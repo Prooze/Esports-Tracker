@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
+import { apiBase } from '../lib/api';
 
 export default function Home() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/games')
+    fetch(`${apiBase}/api/games`)
       .then((r) => r.json())
       .then((data) => { setGames(data); setLoading(false); })
       .catch(() => setLoading(false));

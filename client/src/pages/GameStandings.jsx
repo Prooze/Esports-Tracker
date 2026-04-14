@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
+import { apiBase } from '../lib/api';
 
 function TournamentRow({ tournament }) {
   const [expanded, setExpanded] = useState(false);
@@ -10,7 +11,7 @@ function TournamentRow({ tournament }) {
   const toggle = async () => {
     if (!expanded && !standings) {
       setLoading(true);
-      const res = await fetch(`/api/tournaments/${tournament.id}/standings`);
+      const res = await fetch(`${apiBase}/api/tournaments/${tournament.id}/standings`);
       const data = await res.json();
       setStandings(data.standings);
       setLoading(false);
@@ -102,7 +103,7 @@ export default function GameStandings() {
     setTournaments([]);
 
     async function bootstrap() {
-      const yearsRes = await fetch(`/api/games/${id}/years`);
+      const yearsRes = await fetch(`${apiBase}/api/games/${id}/years`);
       if (!yearsRes.ok) throw new Error('Game not found');
       const { game: g, years } = await yearsRes.json();
       if (cancelled) return;
@@ -119,8 +120,8 @@ export default function GameStandings() {
       setYear(latestYear);
 
       const [sData, tData] = await Promise.all([
-        fetch(`/api/games/${id}/standings?year=${latestYear}`).then((r) => r.json()),
-        fetch(`/api/games/${id}/tournaments?year=${latestYear}`).then((r) => r.json()),
+        fetch(`${apiBase}/api/games/${id}/standings?year=${latestYear}`).then((r) => r.json()),
+        fetch(`${apiBase}/api/games/${id}/tournaments?year=${latestYear}`).then((r) => r.json()),
       ]);
       if (cancelled) return;
 
@@ -139,8 +140,8 @@ export default function GameStandings() {
     setYear(yr);
     setLoading(true);
     const [sData, tData] = await Promise.all([
-      fetch(`/api/games/${id}/standings?year=${yr}`).then((r) => r.json()),
-      fetch(`/api/games/${id}/tournaments?year=${yr}`).then((r) => r.json()),
+      fetch(`${apiBase}/api/games/${id}/standings?year=${yr}`).then((r) => r.json()),
+      fetch(`${apiBase}/api/games/${id}/tournaments?year=${yr}`).then((r) => r.json()),
     ]);
     setStandings(sData.standings);
     setTournaments(tData);

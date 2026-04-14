@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import GameIcon from '../components/GameIcon';
+import { apiBase } from '../lib/api';
 
 // ─── start.gg import form ─────────────────────────────────────────────────────
 function StartggImportForm({ games, onImported, authHeaders }) {
@@ -22,7 +23,7 @@ function StartggImportForm({ games, onImported, authHeaders }) {
     setFetchLoading(true);
 
     try {
-      const res = await fetch('/api/admin/startgg/lookup', {
+      const res = await fetch(`${apiBase}/api/admin/startgg/lookup`, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({ url }),
@@ -53,7 +54,7 @@ function StartggImportForm({ games, onImported, authHeaders }) {
     const event = tournament.events.find((e) => String(e.id) === selectedEvent);
 
     try {
-      const res = await fetch('/api/admin/startgg/import', {
+      const res = await fetch(`${apiBase}/api/admin/startgg/import`, {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
@@ -205,7 +206,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this tournament and all its standings?')) return;
-    await fetch(`/api/admin/tournaments/${id}`, { method: 'DELETE', headers: authHeaders });
+    await fetch(`${apiBase}/api/admin/tournaments/${id}`, { method: 'DELETE', headers: authHeaders });
     onRefresh();
   };
 
@@ -220,7 +221,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   };
 
   const saveEdit = async () => {
-    await fetch(`/api/admin/tournaments/${editingId}`, {
+    await fetch(`${apiBase}/api/admin/tournaments/${editingId}`, {
       method: 'PUT',
       headers: authHeaders,
       body: JSON.stringify(editData),
@@ -232,7 +233,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const handleManualAdd = async (e) => {
     e.preventDefault();
     setManualError('');
-    const res = await fetch('/api/admin/tournaments', {
+    const res = await fetch(`${apiBase}/api/admin/tournaments`, {
       method: 'POST',
       headers: authHeaders,
       body: JSON.stringify(manualForm),
@@ -427,7 +428,7 @@ function GamesTab({ games, authHeaders, onRefresh }) {
   const handleAdd = async (e) => {
     e.preventDefault();
     setError('');
-    const res = await fetch('/api/admin/games', {
+    const res = await fetch(`${apiBase}/api/admin/games`, {
       method: 'POST',
       headers: authHeaders,
       body: JSON.stringify({ name, icon_emoji: emoji }),
@@ -441,7 +442,7 @@ function GamesTab({ games, authHeaders, onRefresh }) {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this game? All associated tournaments and standings will also be deleted.')) return;
-    await fetch(`/api/admin/games/${id}`, { method: 'DELETE', headers: authHeaders });
+    await fetch(`${apiBase}/api/admin/games/${id}`, { method: 'DELETE', headers: authHeaders });
     onRefresh();
   };
 
@@ -451,7 +452,7 @@ function GamesTab({ games, authHeaders, onRefresh }) {
     const formData = new FormData();
     formData.append('icon', file);
     try {
-      const res = await fetch(`/api/admin/games/${gameId}/icon`, {
+      const res = await fetch(`${apiBase}/api/admin/games/${gameId}/icon`, {
         method: 'POST',
         headers: { Authorization: authHeaders.Authorization },
         body: formData,
@@ -471,7 +472,7 @@ function GamesTab({ games, authHeaders, onRefresh }) {
   const handleRemoveIcon = async (gameId) => {
     setRemovingId(gameId);
     try {
-      await fetch(`/api/admin/games/${gameId}/icon`, {
+      await fetch(`${apiBase}/api/admin/games/${gameId}/icon`, {
         method: 'DELETE',
         headers: authHeaders,
       });
@@ -623,7 +624,7 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
     e.preventDefault();
     setAddError('');
     setAddLoading(true);
-    const res = await fetch('/api/admin/accounts', {
+    const res = await fetch(`${apiBase}/api/admin/accounts`, {
       method: 'POST',
       headers: authHeaders,
       body: JSON.stringify(addForm),
@@ -660,7 +661,7 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
     }
     if (editForm.password) body.password = editForm.password;
 
-    const res = await fetch(`/api/admin/accounts/${editingId}`, {
+    const res = await fetch(`${apiBase}/api/admin/accounts/${editingId}`, {
       method: 'PUT',
       headers: authHeaders,
       body: JSON.stringify(body),
@@ -674,7 +675,7 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
 
   const handleDelete = async (id, username) => {
     if (!confirm(`Delete admin account "${username}"? This cannot be undone.`)) return;
-    const res = await fetch(`/api/admin/accounts/${id}`, {
+    const res = await fetch(`${apiBase}/api/admin/accounts/${id}`, {
       method: 'DELETE',
       headers: authHeaders,
     });
@@ -871,7 +872,7 @@ function SettingsTab({ settings, authHeaders, onRefresh }) {
     setSaved(false);
     setError('');
 
-    const res = await fetch('/api/admin/settings', {
+    const res = await fetch(`${apiBase}/api/admin/settings`, {
       method: 'PUT',
       headers: authHeaders,
       body: JSON.stringify({ startgg_token: startggToken }),
@@ -949,10 +950,10 @@ export default function Admin() {
 
   const fetchData = useCallback(async () => {
     const [gRes, tRes, sRes, aRes] = await Promise.all([
-      fetch('/api/admin/games',       { headers: authHeaders }),
-      fetch('/api/admin/tournaments', { headers: authHeaders }),
-      fetch('/api/admin/settings',    { headers: authHeaders }),
-      fetch('/api/admin/accounts',    { headers: authHeaders }),
+      fetch(`${apiBase}/api/admin/games`,       { headers: authHeaders }),
+      fetch(`${apiBase}/api/admin/tournaments`, { headers: authHeaders }),
+      fetch(`${apiBase}/api/admin/settings`,    { headers: authHeaders }),
+      fetch(`${apiBase}/api/admin/accounts`,    { headers: authHeaders }),
     ]);
     const [g, t, s, a] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json()]);
     setGames(g);
