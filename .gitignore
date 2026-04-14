@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+server/.env
+
+# Uploaded game icons
+server/uploads/
+
+# Database
+data/
+*.sqlite
+*.db
+
+# Build output
+dist/
+client/dist/
+
+# Claude Code memory
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
