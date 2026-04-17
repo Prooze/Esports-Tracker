@@ -30,11 +30,12 @@ async function provisionFirstAdmin() {
   console.log(`✓ First superadmin created: ${FIRST_ADMIN_USER.trim()}`);
 }
 
-// Ensure uploads directory exists
+// Ensure uploads directories exist
 const uploadsDir = path.join(__dirname, '../uploads/icons');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const brandingDir = path.join(__dirname, '../uploads/branding');
+if (!fs.existsSync(brandingDir)) fs.mkdirSync(brandingDir, { recursive: true });
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -47,6 +48,38 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// ─── Public settings endpoint (no auth) ──────────────────────────────────────
+app.get('/api/settings/public', (req, res) => {
+  const rows = db.prepare('SELECT * FROM settings').all();
+  const raw = {};
+  for (const { key, value } of rows) raw[key] = value;
+
+  // Strip sensitive keys
+  delete raw.startgg_token;
+
+  // Parse JSON fields
+  let footer_links = [];
+  let social_links = [];
+  try { footer_links = JSON.parse(raw.footer_links || '[]'); } catch (_) {}
+  try { social_links = JSON.parse(raw.social_links || '[]'); } catch (_) {}
+
+  const toPath = (v) => (v && v.trim()) ? v : null;
+
+  res.json({
+    site_name:           raw.site_name           || 'Esports Standings',
+    site_tagline:        raw.site_tagline         || 'Local Circuit',
+    site_logo:           toPath(raw.site_logo),
+    site_favicon:        toPath(raw.site_favicon),
+    hero_banner:         toPath(raw.hero_banner),
+    primary_color:       raw.primary_color        || '#7c6fff',
+    accent_color:        raw.accent_color         || '#7c6fff',
+    announcement_text:   raw.announcement_text    || '',
+    announcement_active: raw.announcement_active  === 'true',
+    footer_links,
+    social_links,
+  });
+});
 
 app.use('/api/auth',        authRoutes);
 app.use('/api/games',       gamesRoutes);

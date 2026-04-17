@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useBranding } from '../context/BrandingContext';
 import GameIcon from '../components/GameIcon';
 import { apiBase } from '../lib/api';
+import { SOCIAL_PLATFORMS, SocialIcon } from '../lib/socialIcons';
 
 // ─── start.gg import form ─────────────────────────────────────────────────────
 function StartggImportForm({ games, onImported, authHeaders }) {
@@ -924,6 +926,414 @@ function SettingsTab({ settings, authHeaders, onRefresh }) {
   );
 }
 
+// ─── Branding tab ─────────────────────────────────────────────────────────────
+function parseJSON(val, fallback) {
+  if (Array.isArray(val)) return val;
+  try { return JSON.parse(val || '[]'); } catch { return fallback; }
+}
+
+function UploadArea({ label, hint, currentPath, uploadKey, onUpload, onRemove, uploading, wide }) {
+  const inputRef = useRef(null);
+  const fullUrl = currentPath ? `${apiBase}${currentPath}` : null;
+
+  return (
+    <div className="form-group">
+      <label>{label}</label>
+      {hint && <small>{hint}</small>}
+      <div className="upload-area" onClick={() => inputRef.current?.click()}>
+        {fullUrl ? (
+          <img
+            src={fullUrl}
+            alt={label}
+            className={wide ? 'upload-preview-wide' : 'upload-preview'}
+            style={wide ? { width: '100%' } : {}}
+          />
+        ) : (
+          <span className="dim" style={{ fontSize: 12 }}>Click to upload…</span>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => e.target.files[0] && onUpload(uploadKey, e.target.files[0])}
+        />
+      </div>
+      {fullUrl && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <button type="button" className="btn-secondary small" disabled={uploading} onClick={() => inputRef.current?.click()}>
+            {uploading ? 'Uploading…' : 'Replace'}
+          </button>
+          <button type="button" className="btn-ghost small" onClick={onRemove}>Remove</button>
+        </div>
+      )}
+      {!fullUrl && uploading && <small>Uploading…</small>}
+    </div>
+  );
+}
+
+function BrandingTab({ settings, authHeaders, onRefresh }) {
+  const { reloadBranding } = useBranding();
+
+  const [form, setForm] = useState({
+    site_name: 'Esports Standings',
+    site_tagline: 'Local Circuit',
+    primary_color: '#7c6fff',
+    accent_color: '#7c6fff',
+    announcement_text: '',
+    announcement_active: false,
+    footer_links: [],
+    social_links: [],
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [uploading, setUploading] = useState(null);
+
+  useEffect(() => {
+    setForm({
+      site_name:          settings.site_name          || 'Esports Standings',
+      site_tagline:       settings.site_tagline        || 'Local Circuit',
+      primary_color:      settings.primary_color       || '#7c6fff',
+      accent_color:       settings.accent_color        || '#7c6fff',
+      announcement_text:  settings.announcement_text   || '',
+      announcement_active: settings.announcement_active === 'true' || settings.announcement_active === true,
+      footer_links:       parseJSON(settings.footer_links,  []),
+      social_links:       parseJSON(settings.social_links,  []),
+    });
+  }, [settings]);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setSaved(false);
+    setSaveError('');
+    const res = await fetch(`${apiBase}/api/admin/settings/branding`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setSaved(true);
+      onRefresh();
+      reloadBranding();
+      setTimeout(() => setSaved(false), 3000);
+    } else {
+      const data = await res.json();
+      setSaveError(data.error || 'Save failed');
+    }
+  };
+
+  const handleUpload = async (type, file) => {
+    setUploading(type);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/settings/${type}`, {
+        method: 'POST',
+        headers: { Authorization: authHeaders.Authorization },
+        body: formData,
+      });
+      if (res.ok) {
+        onRefresh();
+        reloadBranding();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Upload failed');
+      }
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const handleRemoveFile = async (type) => {
+    await fetch(`${apiBase}/api/admin/settings/${type}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    onRefresh();
+    reloadBranding();
+  };
+
+  // Footer links helpers
+  const addFooterLink  = () => setForm(f => ({ ...f, footer_links: [...f.footer_links, { label: '', url: '' }] }));
+  const removeFooterLink = (i) => setForm(f => ({ ...f, footer_links: f.footer_links.filter((_, idx) => idx !== i) }));
+  const updateFooterLink = (i, field, val) => setForm(f => ({
+    ...f,
+    footer_links: f.footer_links.map((l, idx) => idx === i ? { ...l, [field]: val } : l),
+  }));
+  const moveFooterLink = (i, dir) => {
+    const arr = [...form.footer_links];
+    const j = i + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    setForm(f => ({ ...f, footer_links: arr }));
+  };
+
+  // Social links helpers
+  const addSocialLink = () => setForm(f => ({ ...f, social_links: [...f.social_links, { platform: 'twitter', url: '' }] }));
+  const removeSocialLink = (i) => setForm(f => ({ ...f, social_links: f.social_links.filter((_, idx) => idx !== i) }));
+  const updateSocialLink = (i, field, val) => setForm(f => ({
+    ...f,
+    social_links: f.social_links.map((l, idx) => idx === i ? { ...l, [field]: val } : l),
+  }));
+
+  return (
+    <form onSubmit={handleSave} className="tab-content">
+
+      {/* ── Identity ── */}
+      <div className="card">
+        <h3 className="card-title">Site Identity</h3>
+        <div className="form-row" style={{ flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ flex: '2 1 220px' }}>
+            <label>Site Name</label>
+            <input
+              value={form.site_name}
+              onChange={(e) => setForm(f => ({ ...f, site_name: e.target.value }))}
+              placeholder="Esports Standings"
+            />
+          </div>
+          <div className="form-group" style={{ flex: '2 1 220px' }}>
+            <label>Tagline</label>
+            <input
+              value={form.site_tagline}
+              onChange={(e) => setForm(f => ({ ...f, site_tagline: e.target.value }))}
+              placeholder="Local Circuit"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Images ── */}
+      <div className="card">
+        <h3 className="card-title">Images</h3>
+        <div className="form-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div style={{ flex: '1 1 200px' }}>
+            <UploadArea
+              label="Site Logo"
+              hint="Shown in the navbar. Recommended: transparent PNG, max 400×100 px"
+              currentPath={settings.site_logo || ''}
+              uploadKey="logo"
+              onUpload={handleUpload}
+              onRemove={() => handleRemoveFile('logo')}
+              uploading={uploading === 'logo'}
+            />
+          </div>
+          <div style={{ flex: '1 1 140px' }}>
+            <UploadArea
+              label="Favicon"
+              hint="Browser tab icon. 32×32 or 64×64 px"
+              currentPath={settings.site_favicon || ''}
+              uploadKey="favicon"
+              onUpload={handleUpload}
+              onRemove={() => handleRemoveFile('favicon')}
+              uploading={uploading === 'favicon'}
+            />
+          </div>
+        </div>
+        <UploadArea
+          label="Hero Banner"
+          hint="Full-width image behind the homepage hero text. Recommended: 1600×500 px"
+          currentPath={settings.hero_banner || ''}
+          uploadKey="banner"
+          onUpload={handleUpload}
+          onRemove={() => handleRemoveFile('banner')}
+          uploading={uploading === 'banner'}
+          wide
+        />
+      </div>
+
+      {/* ── Colors + Preview ── */}
+      <div className="card">
+        <h3 className="card-title">Colors</h3>
+        <div className="form-row" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div className="form-group" style={{ flex: '1 1 180px' }}>
+            <label>Accent Color</label>
+            <small>Buttons, active tabs, links</small>
+            <div className="color-row">
+              <input
+                type="color"
+                value={form.accent_color}
+                onChange={(e) => setForm(f => ({ ...f, accent_color: e.target.value }))}
+                style={{ width: 44, padding: '2px 3px', flex: 'none' }}
+              />
+              <input
+                value={form.accent_color}
+                onChange={(e) => setForm(f => ({ ...f, accent_color: e.target.value }))}
+                placeholder="#7c6fff"
+                style={{ flex: 1, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+          <div className="form-group" style={{ flex: '1 1 180px' }}>
+            <label>Primary Color</label>
+            <small>Logo text &amp; hero gradient highlight</small>
+            <div className="color-row">
+              <input
+                type="color"
+                value={form.primary_color}
+                onChange={(e) => setForm(f => ({ ...f, primary_color: e.target.value }))}
+                style={{ width: 44, padding: '2px 3px', flex: 'none' }}
+              />
+              <input
+                value={form.primary_color}
+                onChange={(e) => setForm(f => ({ ...f, primary_color: e.target.value }))}
+                placeholder="#ffffff"
+                style={{ flex: 1, fontFamily: 'monospace' }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Live preview */}
+        <div>
+          <label className="form-group" style={{ marginBottom: 8 }}><span style={{ color: 'var(--text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '1.5px' }}>Navbar Preview</span></label>
+          <div className="branding-preview-panel">
+            <div className="branding-preview-nav" style={{ color: form.accent_color }}>
+              {settings.site_logo
+                ? <img src={`${apiBase}${settings.site_logo}`} alt="logo" style={{ height: 30, objectFit: 'contain' }} />
+                : (form.site_name || 'ESPORTS TRACKER').toUpperCase()
+              }
+            </div>
+            <div style={{ padding: '16px', background: 'var(--bg)', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+              <div style={{
+                fontFamily: 'var(--font-head)',
+                fontSize: 38,
+                letterSpacing: 4,
+                background: `linear-gradient(135deg, ${form.primary_color} 40%, ${form.accent_color})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}>
+                {(form.site_name || 'ESPORTS STANDINGS').toUpperCase()}
+              </div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 12, letterSpacing: 2, textTransform: 'uppercase' }}>
+                {form.site_tagline || 'Local Circuit'}
+              </div>
+              <button
+                type="button"
+                style={{ background: form.accent_color, color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', marginTop: 4, cursor: 'default' }}
+              >
+                Sample Button
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Announcement Bar ── */}
+      <div className="card">
+        <h3 className="card-title">Announcement Bar</h3>
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={form.announcement_active}
+              onChange={(e) => setForm(f => ({ ...f, announcement_active: e.target.checked }))}
+              style={{ width: 'auto', padding: 0 }}
+            />
+            Show announcement bar at top of page
+          </label>
+        </div>
+        <div className="form-group">
+          <label>Announcement Text</label>
+          <input
+            value={form.announcement_text}
+            onChange={(e) => setForm(f => ({ ...f, announcement_text: e.target.value }))}
+            placeholder="e.g. Season 3 registrations are now open!"
+          />
+        </div>
+        {form.announcement_active && form.announcement_text && (
+          <div className="announcement-bar" style={{ borderRadius: 6 }}>
+            {form.announcement_text}
+          </div>
+        )}
+      </div>
+
+      {/* ── Footer Links ── */}
+      <div className="card">
+        <div className="section-head">
+          <h3 className="card-title" style={{ marginBottom: 0 }}>Footer Links</h3>
+          <button type="button" className="btn-ghost small" onClick={addFooterLink}>+ Add Link</button>
+        </div>
+        {form.footer_links.length === 0 ? (
+          <div className="empty-state" style={{ padding: '16px 20px' }}>No footer links yet.</div>
+        ) : (
+          <div className="link-manager">
+            {form.footer_links.map((link, i) => (
+              <div key={i} className="link-row">
+                <input
+                  value={link.label}
+                  onChange={(e) => updateFooterLink(i, 'label', e.target.value)}
+                  placeholder="Label"
+                  style={{ flex: '1 1 140px' }}
+                />
+                <input
+                  value={link.url}
+                  onChange={(e) => updateFooterLink(i, 'url', e.target.value)}
+                  placeholder="https://…"
+                  style={{ flex: '2 1 220px' }}
+                />
+                <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i, -1)} disabled={i === 0} title="Move up">↑</button>
+                <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i,  1)} disabled={i === form.footer_links.length - 1} title="Move down">↓</button>
+                <button type="button" className="btn-danger small" onClick={() => removeFooterLink(i)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Social Links ── */}
+      <div className="card">
+        <div className="section-head">
+          <h3 className="card-title" style={{ marginBottom: 0 }}>Social Links</h3>
+          <button type="button" className="btn-ghost small" onClick={addSocialLink}>+ Add Social</button>
+        </div>
+        {form.social_links.length === 0 ? (
+          <div className="empty-state" style={{ padding: '16px 20px' }}>No social links yet.</div>
+        ) : (
+          <div className="link-manager">
+            {form.social_links.map((link, i) => (
+              <div key={i} className="link-row">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 160px' }}>
+                  <SocialIcon platform={link.platform} size={18} />
+                  <select
+                    value={link.platform}
+                    onChange={(e) => updateSocialLink(i, 'platform', e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    {SOCIAL_PLATFORMS.map(p => (
+                      <option key={p.key} value={p.key}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  value={link.url}
+                  onChange={(e) => updateSocialLink(i, 'url', e.target.value)}
+                  placeholder="https://…"
+                  style={{ flex: '2 1 220px' }}
+                />
+                <button type="button" className="btn-danger small" onClick={() => removeSocialLink(i)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Save ── */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Save Branding Settings'}
+        </button>
+        {saved && <span className="success-msg" style={{ padding: '6px 12px' }}>Saved!</span>}
+        {saveError && <span className="error-msg" style={{ padding: '6px 12px' }}>{saveError}</span>}
+      </div>
+    </form>
+  );
+}
+
 // ─── Admin root ───────────────────────────────────────────────────────────────
 export default function Admin() {
   const { token, user, hasPermission } = useAuth();
@@ -934,6 +1344,7 @@ export default function Admin() {
     hasPermission('manage_games')       && 'games',
     hasPermission('manage_accounts')    && 'accounts',
     'settings', // always visible
+    hasPermission('manage_games')       && 'branding',
   ].filter(Boolean);
 
   const [tab, setTab] = useState(() => visibleTabs[0] || 'settings');
@@ -1005,6 +1416,9 @@ export default function Admin() {
       )}
       {tab === 'settings' && (
         <SettingsTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
+      )}
+      {tab === 'branding' && (
+        <BrandingTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
       )}
     </main>
   );

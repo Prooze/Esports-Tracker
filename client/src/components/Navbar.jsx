@@ -1,19 +1,34 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useBranding } from '../context/BrandingContext';
+import { apiBase } from '../lib/api';
 
 export default function Navbar() {
   const { token, user, logout } = useAuth();
   const navigate = useNavigate();
+  const { branding } = useBranding();
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
 
+  const logoContent = branding.site_logo ? (
+    <img
+      src={`${apiBase}${branding.site_logo}`}
+      alt={branding.site_name || 'Logo'}
+      style={{ height: 34, width: 'auto', objectFit: 'contain', display: 'block' }}
+    />
+  ) : (
+    branding.site_name || 'ESPORTS TRACKER'
+  );
+
   return (
     <nav className="navbar">
       <div className="navbar-inner">
-        <Link to="/" className="navbar-logo">ESPORTS TRACKER</Link>
+        <Link to="/" className="navbar-logo">
+          {logoContent}
+        </Link>
         <div className="navbar-links">
           {token ? (
             <>

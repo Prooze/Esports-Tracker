@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
+import { useBranding } from '../context/BrandingContext';
 import { apiBase } from '../lib/api';
 
 export default function Home() {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { branding } = useBranding();
 
   useEffect(() => {
     fetch(`${apiBase}/api/games`)
@@ -16,9 +18,22 @@ export default function Home() {
 
   return (
     <main className="container">
-      <div className="hero">
-        <h1 className="hero-title">TOURNAMENT<br />STANDINGS</h1>
-        <p className="hero-subtitle">Track season points across all your games</p>
+      <div className={`hero${branding.hero_banner ? ' hero-has-banner' : ''}`}>
+        {branding.hero_banner && (
+          <>
+            <img
+              src={`${apiBase}${branding.hero_banner}`}
+              alt=""
+              className="hero-banner-img"
+              aria-hidden="true"
+            />
+            <div className="hero-banner-overlay" aria-hidden="true" />
+          </>
+        )}
+        <div className="hero-content">
+          <h1 className="hero-title">{(branding.site_name || 'Esports Standings').toUpperCase()}</h1>
+          <p className="hero-subtitle">{branding.site_tagline || 'Local Circuit'}</p>
+        </div>
       </div>
 
       {loading ? (

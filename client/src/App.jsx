@@ -1,10 +1,13 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { BrandingProvider, useBranding } from './context/BrandingContext';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import GameStandings from './pages/GameStandings';
 import Login from './pages/Login';
 import Admin from './pages/Admin';
+import { SocialIcon, SOCIAL_PLATFORMS } from './lib/socialIcons';
+import { apiBase } from './lib/api';
 
 function ProtectedRoute({ children }) {
   const { token } = useAuth();
@@ -12,9 +15,57 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+function SiteFooter() {
+  const { branding } = useBranding();
+  const hasFooter = (branding.footer_links?.length > 0) || (branding.social_links?.length > 0);
+  if (!hasFooter) return null;
+
+  return (
+    <footer className="site-footer">
+      {branding.footer_links?.length > 0 && (
+        <nav className="footer-links" aria-label="Footer links">
+          {branding.footer_links.map((link, i) => (
+            link.label && link.url
+              ? <a key={i} href={link.url} className="footer-link" target="_blank" rel="noopener noreferrer">{link.label}</a>
+              : null
+          ))}
+        </nav>
+      )}
+      {branding.social_links?.length > 0 && (
+        <div className="social-links">
+          {branding.social_links.map((link, i) => {
+            const platform = SOCIAL_PLATFORMS.find(p => p.key === link.platform);
+            if (!platform || !link.url) return null;
+            return (
+              <a
+                key={i}
+                href={link.url}
+                className="social-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={platform.label}
+                title={platform.label}
+              >
+                <SocialIcon platform={link.platform} size={20} />
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </footer>
+  );
+}
+
 function AppRoutes() {
+  const { branding } = useBranding();
+
   return (
     <>
+      {branding.announcement_active && branding.announcement_text && (
+        <div className="announcement-bar" role="banner">
+          {branding.announcement_text}
+        </div>
+      )}
       <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -29,6 +80,7 @@ function AppRoutes() {
           }
         />
       </Routes>
+      <SiteFooter />
     </>
   );
 }
@@ -36,7 +88,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <BrandingProvider>
+        <AppRoutes />
+      </BrandingProvider>
     </AuthProvider>
   );
 }

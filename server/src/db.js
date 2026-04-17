@@ -64,4 +64,20 @@ for (const sql of migrations) {
   try { db.exec(sql); } catch (_) {}
 }
 
+// Seed default branding settings (INSERT OR IGNORE so they're never overwritten)
+const brandingDefaults = [
+  ['site_name',           'Esports Standings'],
+  ['site_tagline',        'Local Circuit'],
+  ['primary_color',       '#7c6fff'],
+  ['accent_color',        '#7c6fff'],
+  ['footer_links',        '[]'],
+  ['social_links',        '[]'],
+  ['announcement_text',   ''],
+  ['announcement_active', 'false'],
+];
+const seedSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+for (const [key, value] of brandingDefaults) {
+  seedSetting.run(key, value);
+}
+
 module.exports = db;

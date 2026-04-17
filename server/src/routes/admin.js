@@ -393,4 +393,75 @@ router.put('/settings', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Branding settings ────────────────────────────────────────────────────────
+const brandingDir = path.join(__dirname, '../../uploads/branding');
+
+const brandingStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, brandingDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${req.params.type}-${Date.now()}${ext}`);
+  },
+});
+
+const brandingUpload = multer({
+  storage: brandingStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed'));
+    }
+    cb(null, true);
+  },
+});
+
+function deleteBrandingFile(filePath) {
+  if (!filePath) return;
+  const fullPath = path.join(brandingDir, path.basename(filePath));
+  try { fs.unlinkSync(fullPath); } catch (_) {}
+}
+
+const BRANDING_TEXT_KEYS = [
+  'site_name', 'site_tagline', 'primary_color', 'accent_color',
+  'footer_links', 'social_links', 'announcement_text', 'announcement_active',
+];
+
+router.put('/settings/branding', checkPermission('manage_games'), (req, res) => {
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+  for (const key of BRANDING_TEXT_KEYS) {
+    if (req.body[key] === undefined) continue;
+    const raw = req.body[key];
+    // JSON-serialise arrays; stringify booleans/strings as-is
+    const value = Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
+    upsert.run(key, value);
+  }
+
+  res.json({ success: true });
+});
+
+router.post('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), (req, res) => {
+  brandingUpload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const settingKey = req.params.type === 'banner' ? 'hero_banner' : `site_${req.params.type}`;
+    const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
+    if (existing?.value) deleteBrandingFile(existing.value);
+
+    const filePath = `/uploads/branding/${req.file.filename}`;
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, filePath);
+
+    res.json({ path: filePath });
+  });
+});
+
+router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), (req, res) => {
+  const settingKey = req.params.type === 'banner' ? 'hero_banner' : `site_${req.params.type}`;
+  const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
+  if (existing?.value) deleteBrandingFile(existing.value);
+  db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, '');
+  res.json({ success: true });
+});
+
 module.exports = router;
