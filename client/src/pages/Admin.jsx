@@ -1,9 +1,39 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Component } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import GameIcon from '../components/GameIcon';
 import { apiBase } from '../lib/api';
 import { SOCIAL_PLATFORMS, SocialIcon } from '../lib/socialIcons';
+
+// ─── Error boundary ───────────────────────────────────────────────────────────
+class AdminErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <main className="container admin-container">
+          <h1 className="admin-title">ADMIN DASHBOARD</h1>
+          <div className="error-msg" style={{ margin: '24px 0' }}>
+            <strong>Something went wrong loading the admin panel.</strong>
+            <br /><br />
+            {String(this.state.error.message || this.state.error)}
+            <br /><br />
+            <button className="btn-ghost small" onClick={() => this.setState({ error: null })}>
+              Try again
+            </button>
+          </div>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── start.gg import form ─────────────────────────────────────────────────────
 function StartggImportForm({ games, onImported, authHeaders }) {
@@ -929,7 +959,7 @@ function SettingsTab({ settings, authHeaders, onRefresh }) {
 // ─── Branding tab ─────────────────────────────────────────────────────────────
 function parseJSON(val, fallback) {
   if (Array.isArray(val)) return val;
-  try { return JSON.parse(val || '[]'); } catch { return fallback; }
+  try { return JSON.parse(val || '[]'); } catch (_e) { return fallback; }
 }
 
 function UploadArea({ label, hint, currentPath, uploadKey, onUpload, onRemove, uploading, wide }) {
@@ -1335,7 +1365,7 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
 }
 
 // ─── Admin root ───────────────────────────────────────────────────────────────
-export default function Admin() {
+function AdminPanel() {
   const { token, user, hasPermission } = useAuth();
 
   // Determine which tabs this admin can see
@@ -1353,6 +1383,7 @@ export default function Admin() {
   const [settings, setSettings] = useState({});
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -1360,24 +1391,44 @@ export default function Admin() {
   };
 
   const fetchData = useCallback(async () => {
-    const [gRes, tRes, sRes, aRes] = await Promise.all([
-      fetch(`${apiBase}/api/admin/games`,       { headers: authHeaders }),
-      fetch(`${apiBase}/api/admin/tournaments`, { headers: authHeaders }),
-      fetch(`${apiBase}/api/admin/settings`,    { headers: authHeaders }),
-      fetch(`${apiBase}/api/admin/accounts`,    { headers: authHeaders }),
-    ]);
-    const [g, t, s, a] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json()]);
-    setGames(g);
-    setTournaments(t);
-    setSettings(s);
-    setAccounts(a);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [gRes, tRes, sRes, aRes] = await Promise.all([
+        fetch(`${apiBase}/api/admin/games`,       { headers: authHeaders }),
+        fetch(`${apiBase}/api/admin/tournaments`, { headers: authHeaders }),
+        fetch(`${apiBase}/api/admin/settings`,    { headers: authHeaders }),
+        fetch(`${apiBase}/api/admin/accounts`,    { headers: authHeaders }),
+      ]);
+      if (!gRes.ok || !tRes.ok || !sRes.ok || !aRes.ok) {
+        throw new Error(`Server error — status ${[gRes, tRes, sRes, aRes].map(r => r.status).join(', ')}`);
+      }
+      const [g, t, s, a] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json()]);
+      setGames(Array.isArray(g) ? g : []);
+      setTournaments(Array.isArray(t) ? t : []);
+      setSettings(s && typeof s === 'object' ? s : {});
+      setAccounts(Array.isArray(a) ? a : []);
+    } catch (err) {
+      setLoadError(err.message || 'Failed to load admin data. Is the server running?');
+    } finally {
+      setLoading(false);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   if (loading) return <div className="loading">Loading admin panel…</div>;
+
+  if (loadError) return (
+    <main className="container admin-container">
+      <h1 className="admin-title">ADMIN DASHBOARD</h1>
+      <div className="error-msg" style={{ margin: '24px 0' }}>
+        {loadError}
+        <br /><br />
+        <button className="btn-ghost small" onClick={fetchData}>Retry</button>
+      </div>
+    </main>
+  );
 
   return (
     <main className="container admin-container">
@@ -1421,5 +1472,13 @@ export default function Admin() {
         <BrandingTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
       )}
     </main>
+  );
+}
+
+export default function Admin() {
+  return (
+    <AdminErrorBoundary>
+      <AdminPanel />
+    </AdminErrorBoundary>
   );
 }

@@ -17,23 +17,25 @@ function ProtectedRoute({ children }) {
 
 function SiteFooter() {
   const { branding } = useBranding();
-  const hasFooter = (branding.footer_links?.length > 0) || (branding.social_links?.length > 0);
+  const footerLinks  = Array.isArray(branding.footer_links)  ? branding.footer_links  : [];
+  const socialLinks  = Array.isArray(branding.social_links)  ? branding.social_links  : [];
+  const hasFooter    = footerLinks.some(l => l.label && l.url) || socialLinks.some(l => l.url);
   if (!hasFooter) return null;
 
   return (
     <footer className="site-footer">
-      {branding.footer_links?.length > 0 && (
+      {footerLinks.some(l => l.label && l.url) && (
         <nav className="footer-links" aria-label="Footer links">
-          {branding.footer_links.map((link, i) => (
+          {footerLinks.map((link, i) =>
             link.label && link.url
               ? <a key={i} href={link.url} className="footer-link" target="_blank" rel="noopener noreferrer">{link.label}</a>
               : null
-          ))}
+          )}
         </nav>
       )}
-      {branding.social_links?.length > 0 && (
+      {socialLinks.some(l => l.url) && (
         <div className="social-links">
-          {branding.social_links.map((link, i) => {
+          {socialLinks.map((link, i) => {
             const platform = SOCIAL_PLATFORMS.find(p => p.key === link.platform);
             if (!platform || !link.url) return null;
             return (

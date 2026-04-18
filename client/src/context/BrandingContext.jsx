@@ -54,13 +54,25 @@ export function BrandingProvider({ children }) {
 
   const reloadBranding = useCallback(() => {
     fetch(`${apiBase}/api/settings/public`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
-        const merged = { ...DEFAULTS, ...data };
+        if (!data || typeof data !== 'object') return;
+        // Ensure arrays are arrays (defensive against unexpected server values)
+        const safe = {
+          ...data,
+          footer_links: Array.isArray(data.footer_links) ? data.footer_links : [],
+          social_links:  Array.isArray(data.social_links)  ? data.social_links  : [],
+        };
+        const merged = { ...DEFAULTS, ...safe };
         setBranding(merged);
         applyBrandingVars(merged);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Network error or bad JSON — keep defaults, don't crash
+      });
   }, []);
 
   useEffect(() => {
