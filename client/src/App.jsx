@@ -17,20 +17,30 @@ function ProtectedRoute({ children }) {
 
 function SiteFooter() {
   const { branding } = useBranding();
-  const footerLinks  = Array.isArray(branding.footer_links)  ? branding.footer_links  : [];
+  const footerItems  = Array.isArray(branding.footer_links)  ? branding.footer_links  : [];
   const socialLinks  = Array.isArray(branding.social_links)  ? branding.social_links  : [];
-  const hasFooter    = footerLinks.some(l => l.label && l.url) || socialLinks.some(l => l.url);
-  if (!hasFooter) return null;
+
+  const hasFooterContent = footerItems.some(item =>
+    (item.type === 'text' && item.content) ||
+    ((item.type === 'link' || !item.type) && item.label && item.url)
+  ) || socialLinks.some(l => l.url);
+  if (!hasFooterContent) return null;
 
   return (
     <footer className="site-footer">
-      {footerLinks.some(l => l.label && l.url) && (
-        <nav className="footer-links" aria-label="Footer links">
-          {footerLinks.map((link, i) =>
-            link.label && link.url
-              ? <a key={i} href={link.url} className="footer-link" target="_blank" rel="noopener noreferrer">{link.label}</a>
-              : null
-          )}
+      {footerItems.length > 0 && (
+        <nav className="footer-links" aria-label="Footer">
+          {footerItems.map((item, i) => {
+            if (item.type === 'text') {
+              return item.content
+                ? <span key={i} className="footer-text">{item.content}</span>
+                : null;
+            }
+            // 'link' type or legacy items without a type field
+            return item.label && item.url
+              ? <a key={i} href={item.url} className="footer-link" target="_blank" rel="noopener noreferrer">{item.label}</a>
+              : null;
+          })}
         </nav>
       )}
       {socialLinks.some(l => l.url) && (

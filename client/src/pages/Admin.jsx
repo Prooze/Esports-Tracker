@@ -1619,7 +1619,9 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
       accent_color:       settings.accent_color        || '#7c6fff',
       announcement_text:  settings.announcement_text   || '',
       announcement_active: settings.announcement_active === 'true' || settings.announcement_active === true,
-      footer_links:       parseJSON(settings.footer_links,  []),
+      footer_links:       parseJSON(settings.footer_links, []).map(item =>
+        item.type ? item : { type: 'link', label: item.label || '', url: item.url || '' }
+      ),
       social_links:       parseJSON(settings.social_links,  []),
     });
   }, [settings]);
@@ -1677,10 +1679,16 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
     reloadBranding();
   };
 
-  // Footer links helpers
-  const addFooterLink  = () => setForm(f => ({ ...f, footer_links: [...f.footer_links, { label: '', url: '' }] }));
+  // Footer content helpers
+  const addFooterItem = (type) => setForm(f => ({
+    ...f,
+    footer_links: [
+      ...f.footer_links,
+      type === 'text' ? { type: 'text', content: '' } : { type: 'link', label: '', url: '' },
+    ],
+  }));
   const removeFooterLink = (i) => setForm(f => ({ ...f, footer_links: f.footer_links.filter((_, idx) => idx !== i) }));
-  const updateFooterLink = (i, field, val) => setForm(f => ({
+  const updateFooterItem = (i, field, val) => setForm(f => ({
     ...f,
     footer_links: f.footer_links.map((l, idx) => idx === i ? { ...l, [field]: val } : l),
   }));
@@ -1872,35 +1880,62 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
         )}
       </div>
 
-      {/* ── Footer Links ── */}
+      {/* ── Footer Content ── */}
       <div className="card">
         <div className="section-head">
-          <h3 className="card-title" style={{ marginBottom: 0 }}>Footer Links</h3>
-          <button type="button" className="btn-ghost small" onClick={addFooterLink}>+ Add Link</button>
+          <h3 className="card-title" style={{ marginBottom: 0 }}>Footer Content</h3>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className="btn-ghost small" onClick={() => addFooterItem('link')}>+ Add Link</button>
+            <button type="button" className="btn-ghost small" onClick={() => addFooterItem('text')}>+ Add Text</button>
+          </div>
         </div>
+        <p style={{ fontSize: 12, color: 'var(--text-dim)', margin: '0 0 12px' }}>
+          Mix links and plain text (e.g. copyright notices, addresses, ABN).
+        </p>
         {form.footer_links.length === 0 ? (
-          <div className="empty-state" style={{ padding: '16px 20px' }}>No footer links yet.</div>
+          <div className="empty-state" style={{ padding: '16px 20px' }}>No footer content yet.</div>
         ) : (
           <div className="link-manager">
-            {form.footer_links.map((link, i) => (
-              <div key={i} className="link-row">
-                <input
-                  value={link.label}
-                  onChange={(e) => updateFooterLink(i, 'label', e.target.value)}
-                  placeholder="Label"
-                  style={{ flex: '1 1 140px' }}
-                />
-                <input
-                  value={link.url}
-                  onChange={(e) => updateFooterLink(i, 'url', e.target.value)}
-                  placeholder="https://…"
-                  style={{ flex: '2 1 220px' }}
-                />
-                <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i, -1)} disabled={i === 0} title="Move up">↑</button>
-                <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i,  1)} disabled={i === form.footer_links.length - 1} title="Move down">↓</button>
-                <button type="button" className="btn-danger small" onClick={() => removeFooterLink(i)}>✕</button>
-              </div>
-            ))}
+            {form.footer_links.map((item, i) => {
+              const isText = item.type === 'text';
+              const isLast = i === form.footer_links.length - 1;
+              return (
+                <div key={i} className="link-row">
+                  <span
+                    className={`badge ${isText ? 'badge-none' : 'badge-perm'}`}
+                    style={{ flexShrink: 0, fontSize: 10, alignSelf: 'center' }}
+                  >
+                    {isText ? 'TEXT' : 'LINK'}
+                  </span>
+                  {isText ? (
+                    <input
+                      value={item.content || ''}
+                      onChange={(e) => updateFooterItem(i, 'content', e.target.value)}
+                      placeholder="e.g. © 2025 My Org · ABN 12 345 678"
+                      style={{ flex: 1 }}
+                    />
+                  ) : (
+                    <>
+                      <input
+                        value={item.label || ''}
+                        onChange={(e) => updateFooterItem(i, 'label', e.target.value)}
+                        placeholder="Label"
+                        style={{ flex: '1 1 140px' }}
+                      />
+                      <input
+                        value={item.url || ''}
+                        onChange={(e) => updateFooterItem(i, 'url', e.target.value)}
+                        placeholder="https://…"
+                        style={{ flex: '2 1 220px' }}
+                      />
+                    </>
+                  )}
+                  <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i, -1)} disabled={i === 0} title="Move up">↑</button>
+                  <button type="button" className="btn-ghost small" onClick={() => moveFooterLink(i,  1)} disabled={isLast} title="Move down">↓</button>
+                  <button type="button" className="btn-danger small" onClick={() => removeFooterLink(i)}>✕</button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
