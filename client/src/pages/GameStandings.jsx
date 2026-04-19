@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
-import { apiBase } from '../lib/api';
+import { apiBase, resolveImageUrl } from '../lib/api';
+
+function formatEventDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, {
+    weekday: 'short', year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
 
 function TournamentRow({ tournament }) {
   const [expanded, setExpanded] = useState(false);
@@ -90,6 +98,16 @@ export default function GameStandings() {
   const [standings, setStandings] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [upcoming, setUpcoming] = useState([]);
+
+  // Fetch upcoming tournaments for this game whenever the id changes.
+  useEffect(() => {
+    setUpcoming([]);
+    fetch(`${apiBase}/api/upcoming/game/${id}`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setUpcoming(data); })
+      .catch(() => {});
+  }, [id]);
 
   // Bootstrap: fetch available years (and game info) whenever the game id changes.
   // Also loads standings/tournaments for the most recent year automatically.
@@ -230,6 +248,38 @@ export default function GameStandings() {
             )}
           </section>
         </>
+      )}
+
+      {upcoming.length > 0 && (
+        <section className="upcoming-section">
+          <h2 className="upcoming-title">Upcoming Tournaments</h2>
+          <div className="upcoming-grid">
+            {upcoming.map((t) => (
+              <div key={t.id} className="upcoming-card">
+                {t.icon_path
+                  ? <img src={resolveImageUrl(t.icon_path)} alt={game?.name || ''} className="upcoming-game-icon" />
+                  : t.icon_emoji && <span className="upcoming-game-emoji">{t.icon_emoji}</span>
+                }
+                <div className="upcoming-card-header">
+                  <span className="upcoming-date">{formatEventDate(t.event_date)}</span>
+                </div>
+                <div className="upcoming-card-name">{t.name}</div>
+                {t.location && <div className="upcoming-venue">{t.location}</div>}
+                {t.description && <div className="upcoming-desc">{t.description}</div>}
+                {t.startgg_url && (
+                  <a
+                    href={t.startgg_url}
+                    className="upcoming-register"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Register on start.gg
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </main>
   );

@@ -76,7 +76,7 @@ export default function Home() {
               <div key={t.id} className="upcoming-card">
                 {t.icon_path
                   ? <img src={resolveImageUrl(t.icon_path)} alt={t.game_name || ''} className="upcoming-game-icon" />
-                  : t.game_name && <span className="upcoming-game-emoji">{t.icon_emoji}</span>
+                  : t.icon_emoji && <span className="upcoming-game-emoji">{t.icon_emoji}</span>
                 }
                 <div className="upcoming-card-header">
                   {t.game_name && (

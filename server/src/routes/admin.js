@@ -481,11 +481,15 @@ const BRANDING_TEXT_KEYS = [
 router.put('/settings/branding', checkPermission('manage_branding'), (req, res) => {
   const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 
+  console.log('[branding PUT] received announcement_active:', JSON.stringify(req.body.announcement_active), typeof req.body.announcement_active);
+  console.log('[branding PUT] received announcement_text:', JSON.stringify(req.body.announcement_text));
+
   for (const key of BRANDING_TEXT_KEYS) {
     if (req.body[key] === undefined) continue;
     const raw = req.body[key];
     // JSON-serialise arrays; stringify booleans/strings as-is
     const value = Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
+    console.log('[branding PUT] saving:', key, '→', JSON.stringify(value));
     upsert.run(key, value);
   }
 
