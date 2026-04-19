@@ -78,6 +78,10 @@ const migrations = [
     event_date            TEXT,
     created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
+  `ALTER TABLE upcoming_tournaments ADD COLUMN status TEXT NOT NULL DEFAULT 'upcoming'`,
+  `ALTER TABLE upcoming_tournaments ADD COLUMN last_checked_at TEXT`,
+  `ALTER TABLE upcoming_tournaments ADD COLUMN linked_tournament_id INTEGER REFERENCES tournaments(id)`,
+  `ALTER TABLE tournaments ADD COLUMN auto_imported INTEGER NOT NULL DEFAULT 0`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (_) {}

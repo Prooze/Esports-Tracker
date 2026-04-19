@@ -210,6 +210,29 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const [manualError, setManualError] = useState('');
   const [filterGame, setFilterGame] = useState('');
   const [filterYear, setFilterYear] = useState('');
+  const [checkLoading, setCheckLoading] = useState(false);
+  const [checkResult, setCheckResult] = useState(null);
+  const [checkError, setCheckError] = useState('');
+
+  const handleCheckCompletions = async () => {
+    setCheckLoading(true);
+    setCheckResult(null);
+    setCheckError('');
+    try {
+      const res = await fetch(`${apiBase}/api/admin/tournaments/check-completions`, {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCheckResult(data);
+      if (data.completed > 0) onRefresh();
+    } catch (err) {
+      setCheckError(err.message);
+    } finally {
+      setCheckLoading(false);
+    }
+  };
 
   // Years present in the game-filtered subset so the year dropdown stays relevant
   const gameFiltered = filterGame
@@ -295,11 +318,30 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
           </span>
         </h3>
         {canManage && (
-          <button className="btn-ghost small" onClick={() => setShowManual((v) => !v)}>
-            {showManual ? '− Cancel' : '+ Add Manually'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              className="btn-secondary small"
+              onClick={handleCheckCompletions}
+              disabled={checkLoading}
+              title="Check start.gg for completed upcoming tournaments and auto-import standings"
+            >
+              {checkLoading ? 'Checking…' : 'Check Completions'}
+            </button>
+            <button className="btn-ghost small" onClick={() => setShowManual((v) => !v)}>
+              {showManual ? '− Cancel' : '+ Add Manually'}
+            </button>
+          </div>
         )}
       </div>
+      {checkResult && (
+        <div className="success-msg" style={{ marginBottom: 8 }}>
+          Checked {checkResult.checked} tournament{checkResult.checked !== 1 ? 's' : ''}.{' '}
+          {checkResult.completed > 0
+            ? `${checkResult.completed} auto-imported!`
+            : 'No new completions found.'}
+        </div>
+      )}
+      {checkError && <div className="error-msg" style={{ marginBottom: 8 }}>{checkError}</div>}
 
       {tournaments.length > 0 && (
         <div className="form-row" style={{ flexWrap: 'wrap', marginBottom: 4 }}>
@@ -1407,6 +1449,13 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const active    = upcoming.filter((t) => t.status === 'upcoming' && t.event_date >= today);
+  const overdue   = upcoming.filter((t) => t.status === 'upcoming' && t.event_date < today);
+  const completed = upcoming.filter((t) => t.status === 'completed');
 
   const resetForm = () => { setForm(BLANK); setError(''); setEditingId(null); setShowForm(false); };
 
@@ -1451,17 +1500,73 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
     onRefresh();
   };
 
+  const handleDismiss = async (id) => {
+    await fetch(`${apiBase}/api/admin/upcoming/${id}/dismiss`, { method: 'POST', headers: authHeaders });
+    onRefresh();
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     const [y, m, d] = dateStr.split('-');
     return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
+  const renderItem = (t, { showOverdueBadge = false } = {}) => (
+    <div key={t.id} className="list-item">
+      <div className="item-info">
+        <span className="item-name">
+          {t.name}
+          {showOverdueBadge && (
+            <span
+              className="tab-badge"
+              style={{ marginLeft: 8, background: '#f59e0b', color: '#000', fontSize: 11 }}
+            >
+              Past date
+            </span>
+          )}
+          {t.status === 'completed' && t.linked_tournament_id && (
+            <span
+              className="tab-badge"
+              style={{ marginLeft: 8, background: '#22c55e', color: '#000', fontSize: 11 }}
+            >
+              Auto-imported
+            </span>
+          )}
+        </span>
+        {t.game_name && <span className="item-sub">{t.icon_emoji} {t.game_name}</span>}
+        <span className="item-meta">
+          {formatDate(t.event_date)}
+          {t.location && ` · ${t.location}`}
+          {t.startgg_url && ' · Register link set'}
+        </span>
+        {t.description && <span className="item-meta" style={{ marginTop: 2 }}>{t.description}</span>}
+      </div>
+      {canManage && (
+        <div className="item-actions">
+          {t.status === 'upcoming' && (
+            <>
+              <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
+              {showOverdueBadge && (
+                <button className="btn-ghost small" onClick={() => handleDismiss(t.id)} title="Mark as dismissed — won't appear in overdue list">
+                  Dismiss
+                </button>
+              )}
+              <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
+            </>
+          )}
+          {t.status === 'completed' && (
+            <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="tab-content">
       <div className="section-head">
         <h3 className="card-title" style={{ marginBottom: 0 }}>
-          Upcoming Tournaments <span className="dim">({upcoming.length})</span>
+          Upcoming Tournaments <span className="dim">({active.length})</span>
         </h3>
         {canManage && !showForm && (
           <button className="btn-ghost small" onClick={() => { setShowForm(true); setEditingId(null); setForm(BLANK); }}>
@@ -1516,32 +1621,55 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
         </form>
       )}
 
-      <div className="list">
-        {upcoming.length === 0 ? (
+      {/* Overdue section */}
+      {overdue.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: 16 }}>
+            <h4 className="card-title" style={{ marginBottom: 0, color: '#f59e0b', fontSize: 14 }}>
+              Awaiting Completion Check
+              <span className="tab-badge" style={{ marginLeft: 8, background: '#f59e0b', color: '#000' }}>
+                {overdue.length}
+              </span>
+            </h4>
+            <span className="dim" style={{ fontSize: 12 }}>
+              Past their date — use "Check Completions" in the Tournaments tab
+            </span>
+          </div>
+          <div className="list">
+            {overdue.map((t) => renderItem(t, { showOverdueBadge: true }))}
+          </div>
+        </>
+      )}
+
+      {/* Active upcoming */}
+      <div className="list" style={{ marginTop: overdue.length > 0 ? 8 : 0 }}>
+        {active.length === 0 && overdue.length === 0 ? (
           <div className="empty-state">No upcoming tournaments. Add one to display it on the public page.</div>
-        ) : (
-          upcoming.map((t) => (
-            <div key={t.id} className="list-item">
-              <div className="item-info">
-                <span className="item-name">{t.name}</span>
-                {t.game_name && <span className="item-sub">{t.icon_emoji} {t.game_name}</span>}
-                <span className="item-meta">
-                  {formatDate(t.event_date)}
-                  {t.location && ` · ${t.location}`}
-                  {t.startgg_url && ' · Register link set'}
-                </span>
-                {t.description && <span className="item-meta" style={{ marginTop: 2 }}>{t.description}</span>}
-              </div>
-              {canManage && (
-                <div className="item-actions">
-                  <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
-                  <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
-                </div>
-              )}
-            </div>
-          ))
+        ) : active.length === 0 ? null : (
+          active.map((t) => renderItem(t))
         )}
       </div>
+
+      {/* Completed section */}
+      {completed.length > 0 && (
+        <>
+          <div
+            className="section-head"
+            style={{ marginTop: 24, cursor: 'pointer' }}
+            onClick={() => setShowCompleted((v) => !v)}
+          >
+            <h4 className="card-title" style={{ marginBottom: 0, fontSize: 14 }}>
+              Completed <span className="dim">({completed.length})</span>
+            </h4>
+            <button className="btn-ghost small">{showCompleted ? '▲ Hide' : '▼ Show'}</button>
+          </div>
+          {showCompleted && (
+            <div className="list">
+              {completed.map((t) => renderItem(t))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -2012,6 +2140,7 @@ function AdminPanel() {
   const [pendingGames, setPendingGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [importNotification, setImportNotification] = useState(null);
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -2037,6 +2166,14 @@ function AdminPanel() {
       setUpcoming(Array.isArray(u) ? u : []);
       setSettings(s && typeof s === 'object' ? s : {});
       setAccounts(Array.isArray(a) ? a : []);
+
+      // Check for auto-import notification
+      if (s?.auto_import_last_at) {
+        const lastSeen = localStorage.getItem('last_seen_auto_import');
+        if (!lastSeen || s.auto_import_last_at > lastSeen) {
+          setImportNotification(s.auto_import_last_at);
+        }
+      }
 
       // Pending games — only available to manage_games; ignore 403
       try {
@@ -2069,9 +2206,41 @@ function AdminPanel() {
     </main>
   );
 
+  const todayStr = new Date().toISOString().split('T')[0];
+  const overdueCount = upcoming.filter(
+    (t) => t.status === 'upcoming' && t.event_date < todayStr
+  ).length;
+
   return (
     <main className="container admin-container">
       <h1 className="admin-title">ADMIN DASHBOARD</h1>
+
+      {importNotification && (
+        <div
+          className="success-msg"
+          style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>
+            New standings were auto-imported from start.gg.{' '}
+            <button
+              className="btn-ghost small"
+              style={{ marginLeft: 8 }}
+              onClick={() => setTab('tournaments')}
+            >
+              View Tournaments
+            </button>
+          </span>
+          <button
+            className="btn-ghost small"
+            onClick={() => {
+              localStorage.setItem('last_seen_auto_import', importNotification);
+              setImportNotification(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="tabs">
         {visibleTabs.map((t) => (
@@ -2083,6 +2252,11 @@ function AdminPanel() {
             {t.charAt(0).toUpperCase() + t.slice(1)}
             {t === 'games' && pendingGames.length > 0 && (
               <span className="tab-badge" style={{ marginLeft: 6 }}>{pendingGames.length}</span>
+            )}
+            {t === 'upcoming' && overdueCount > 0 && (
+              <span className="tab-badge" style={{ marginLeft: 6, background: '#f59e0b', color: '#000' }}>
+                {overdueCount}
+              </span>
             )}
           </button>
         ))}

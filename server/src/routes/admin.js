@@ -355,6 +355,137 @@ async function performOrganizerSync(slug, token) {
   };
 }
 
+// ─── Completion detection ─────────────────────────────────────────────────────
+async function checkAndCompleteUpcomingTournaments() {
+  const token = db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get()?.value;
+  if (!token) return { checked: 0, completed: 0 };
+
+  const today = new Date().toISOString().split('T')[0];
+  const candidates = db.prepare(`
+    SELECT u.*, g.name AS game_name
+    FROM upcoming_tournaments u
+    LEFT JOIN games g ON u.game_id = g.id
+    WHERE u.startgg_url IS NOT NULL
+      AND u.startgg_url != ''
+      AND u.event_date < ?
+      AND u.status = 'upcoming'
+  `).all(today);
+
+  let completed = 0;
+  const now = new Date().toISOString();
+  const updateChecked = db.prepare('UPDATE upcoming_tournaments SET last_checked_at = ? WHERE id = ?');
+
+  for (const upcoming of candidates) {
+    const slug = extractSlug(upcoming.startgg_url);
+    if (!slug) { updateChecked.run(now, upcoming.id); continue; }
+
+    try {
+      const data = await startggQuery(
+        `query TournamentStatus($slug: String!) {
+          tournament(slug: $slug) {
+            id
+            name
+            state
+            events {
+              id
+              name
+              state
+              videogame { name }
+              standings(query: { page: 1, perPage: 64 }) {
+                nodes {
+                  placement
+                  entrant {
+                    participants {
+                      gamerTag
+                      prefix
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`,
+        { slug },
+        token
+      );
+
+      updateChecked.run(now, upcoming.id);
+
+      const tournament = data.tournament;
+      if (!tournament || tournament.state !== 3) continue;
+
+      // Find the event matching this game
+      let matchedEvent = null;
+      if (upcoming.game_name) {
+        matchedEvent = (tournament.events || []).find(
+          (e) => e.videogame?.name?.toLowerCase() === upcoming.game_name.toLowerCase()
+        );
+      }
+      if (!matchedEvent && tournament.events?.length > 0) {
+        matchedEvent = tournament.events.find((e) => e.state === 3) || tournament.events[0];
+      }
+
+      if (!matchedEvent) {
+        db.prepare("UPDATE upcoming_tournaments SET status = 'completed' WHERE id = ?").run(upcoming.id);
+        continue;
+      }
+
+      const nodes = matchedEvent.standings?.nodes ?? [];
+      const alreadyImported = db.prepare(
+        'SELECT id FROM tournaments WHERE startgg_id = ?'
+      ).get(String(matchedEvent.id));
+
+      let tournamentId = alreadyImported?.id ?? null;
+
+      if (!alreadyImported && nodes.length > 0) {
+        const tResult = db.prepare(
+          'INSERT INTO tournaments (startgg_id, name, event_name, game_id, date, auto_imported) VALUES (?, ?, ?, ?, ?, 1)'
+        ).run(String(matchedEvent.id), tournament.name, matchedEvent.name || null, upcoming.game_id, upcoming.event_date);
+
+        tournamentId = tResult.lastInsertRowid;
+        const insertStanding = db.prepare(
+          'INSERT INTO standings (tournament_id, player_name, placement, points) VALUES (?, ?, ?, ?)'
+        );
+
+        db.transaction(() => {
+          for (const node of nodes) {
+            const participants = node.entrant?.participants ?? [];
+            const playerName = participants.map((p) =>
+              p.prefix ? `${p.prefix} | ${p.gamerTag}` : p.gamerTag
+            ).join(' / ') || 'Unknown';
+            insertStanding.run(tournamentId, playerName, node.placement, getPoints(node.placement));
+          }
+        })();
+
+        completed++;
+        console.log(`[completion-check] Auto-imported "${tournament.name}" — ${matchedEvent.name} (${nodes.length} players)`);
+      }
+
+      db.prepare(
+        'UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?'
+      ).run('completed', tournamentId, upcoming.id);
+    } catch (err) {
+      console.error(`[completion-check] Error for upcoming #${upcoming.id}:`, err.message);
+    }
+  }
+
+  if (completed > 0) {
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('auto_import_last_at', now);
+  }
+
+  return { checked: candidates.length, completed };
+}
+
+router.post('/tournaments/check-completions', checkPermission('manage_tournaments'), async (req, res) => {
+  try {
+    const result = await checkAndCompleteUpcomingTournaments();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/startgg/lookup', checkPermission('manage_tournaments'), async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
@@ -559,6 +690,14 @@ router.delete('/upcoming/:id', checkPermission('manage_upcoming'), (req, res) =>
   res.json({ success: true });
 });
 
+router.post('/upcoming/:id/dismiss', checkPermission('manage_upcoming'), (req, res) => {
+  const { id } = req.params;
+  const row = db.prepare('SELECT id FROM upcoming_tournaments WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  db.prepare("UPDATE upcoming_tournaments SET status = 'dismissed' WHERE id = ?").run(id);
+  res.json({ success: true });
+});
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 const SENSITIVE_SETTINGS = ['startgg_token', 'cloudinary_api_key', 'cloudinary_api_secret'];
 
@@ -704,3 +843,4 @@ router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_br
 module.exports = router;
 module.exports.performOrganizerSync = performOrganizerSync;
 module.exports.extractOrganizerSlug = extractOrganizerSlug;
+module.exports.checkAndCompleteUpcomingTournaments = checkAndCompleteUpcomingTournaments;

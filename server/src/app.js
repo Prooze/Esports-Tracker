@@ -94,7 +94,7 @@ app.get('/api/upcoming', (req, res) => {
     SELECT u.*, g.name AS game_name, g.icon_emoji, g.icon_path
     FROM upcoming_tournaments u
     LEFT JOIN games g ON u.game_id = g.id
-    WHERE u.event_date >= ?
+    WHERE u.event_date >= ? AND u.status = 'upcoming'
     ORDER BY u.event_date ASC
   `).all(today);
   res.json(rows);
@@ -107,7 +107,7 @@ app.get('/api/upcoming/game/:gameId', (req, res) => {
     SELECT u.*, g.name AS game_name, g.icon_emoji, g.icon_path
     FROM upcoming_tournaments u
     LEFT JOIN games g ON u.game_id = g.id
-    WHERE u.game_id = ? AND u.event_date >= ?
+    WHERE u.game_id = ? AND u.event_date >= ? AND u.status = 'upcoming'
     ORDER BY u.event_date ASC
   `).all(req.params.gameId, today);
   res.json(rows);
@@ -119,7 +119,7 @@ app.use('/api/tournaments', tournamentsRoutes);
 app.use('/api/admin',       adminRoutes);
 
 // ─── Auto-sync organizer tournaments ─────────────────────────────────────────
-const { performOrganizerSync, extractOrganizerSlug } = adminRoutes;
+const { performOrganizerSync, extractOrganizerSlug, checkAndCompleteUpcomingTournaments } = adminRoutes;
 
 async function runAutoSync() {
   try {
@@ -147,6 +147,12 @@ async function runAutoSync() {
     upsert.run('startgg_last_synced', now);
     upsert.run('startgg_last_sync_result', JSON.stringify(result));
     console.log('[auto-sync] Organizer sync complete:', result);
+
+    // Also check for newly completed tournaments
+    const completionResult = await checkAndCompleteUpcomingTournaments();
+    if (completionResult.completed > 0) {
+      console.log('[auto-sync] Completion check:', completionResult);
+    }
   } catch (err) {
     console.error('[auto-sync] Error:', err.message);
   }
@@ -157,6 +163,10 @@ setInterval(runAutoSync, 60 * 60 * 1000); // check every hour
 provisionFirstAdmin().then(() => {
   app.listen(PORT, () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
+    // Run completion check on startup (fire-and-forget)
+    checkAndCompleteUpcomingTournaments()
+      .then((r) => { if (r.completed > 0) console.log('[startup] Completion check:', r); })
+      .catch((err) => console.error('[startup] Completion check error:', err.message));
   });
 }).catch(err => {
   console.error('Failed to provision first admin:', err);
