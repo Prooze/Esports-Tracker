@@ -836,6 +836,19 @@ input[type="color"] {
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
+.upcoming-game-icon {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: block;
+}
+.upcoming-game-emoji {
+  font-size: 40px;
+  line-height: 1;
+  display: block;
+}
 .upcoming-date {
   font-size: 11px;
   color: var(--text-dim);
