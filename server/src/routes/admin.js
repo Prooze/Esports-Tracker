@@ -71,6 +71,21 @@ router.post('/games', checkPermission('manage_games'), (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM games WHERE id = ?').get(result.lastInsertRowid));
 });
 
+router.put('/games/:id', checkPermission('manage_games'), (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+
+  const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
+  if (!game) return res.status(404).json({ error: 'Game not found' });
+
+  const taken = db.prepare('SELECT id FROM games WHERE lower(name) = lower(?) AND id != ?').get(name.trim(), id);
+  if (taken) return res.status(409).json({ error: 'A game with that name already exists' });
+
+  db.prepare('UPDATE games SET name = ? WHERE id = ?').run(name.trim(), id);
+  res.json(db.prepare('SELECT * FROM games WHERE id = ?').get(id));
+});
+
 router.delete('/games/:id', checkPermission('manage_games'), async (req, res) => {
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(req.params.id);
   if (game?.icon_path) await destroyIfCloudinary(game.icon_path);

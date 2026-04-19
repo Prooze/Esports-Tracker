@@ -498,6 +498,42 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   const [uploadingId, setUploadingId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const fileInputRefs = useRef({});
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState('');
+
+  const startRename = (g) => {
+    setRenamingId(g.id);
+    setRenameValue(g.name);
+    setRenameError('');
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameValue('');
+    setRenameError('');
+  };
+
+  const saveRename = async (id) => {
+    if (!renameValue.trim()) { setRenameError('Name cannot be empty'); return; }
+    setRenameSaving(true);
+    setRenameError('');
+    try {
+      const res = await fetch(`${apiBase}/api/admin/games/${id}`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ name: renameValue.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRenameError(data.error); return; }
+      setRenamingId(null);
+      setRenameValue('');
+      onRefresh();
+    } finally {
+      setRenameSaving(false);
+    }
+  };
 
   const [approveModal, setApproveModal] = useState(null);
   const [approveForm, setApproveForm] = useState({ game_name: '', icon_emoji: '🎮' });
@@ -817,44 +853,70 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
         {games.length === 0 ? (
           <div className="empty-state">No games yet.</div>
         ) : (
-          games.map((g) => (
-            <div key={g.id} className="list-item" style={{ gap: 12, alignItems: 'center' }}>
-              <div style={{ flexShrink: 0 }}>
-                <GameIcon game={g} size={48} />
-              </div>
-              <span className="item-name" style={{ flex: 1, fontSize: 16 }}>
-                {g.name}
-              </span>
-              {canManage && (
-                <div className="item-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    ref={(el) => { fileInputRefs.current[g.id] = el; }}
-                    onChange={(e) => handleIconUpload(g.id, e.target.files[0])}
-                  />
-                  <button
-                    className="btn-secondary small"
-                    disabled={uploadingId === g.id}
-                    onClick={() => fileInputRefs.current[g.id]?.click()}
-                  >
-                    {uploadingId === g.id ? 'Uploading…' : g.icon_path ? 'Replace Icon' : 'Upload Icon'}
-                  </button>
-                  {g.icon_path && (
-                    <button
-                      className="btn-ghost small"
-                      disabled={removingId === g.id}
-                      onClick={() => handleRemoveIcon(g.id)}
-                    >
-                      {removingId === g.id ? 'Removing…' : 'Remove Icon'}
-                    </button>
-                  )}
-                  <button className="btn-danger small" onClick={() => handleDelete(g.id)}>Delete</button>
+          games.map((g) =>
+            renamingId === g.id ? (
+              <div key={g.id} className="list-item edit-row" style={{ gap: 10, alignItems: 'center' }}>
+                <div style={{ flexShrink: 0 }}>
+                  <GameIcon game={g} size={48} />
                 </div>
-              )}
-            </div>
-          ))
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveRename(g.id);
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                    autoFocus
+                    style={{ fontSize: 15 }}
+                  />
+                  {renameError && <span className="error-msg" style={{ padding: '2px 0', fontSize: 12 }}>{renameError}</span>}
+                </div>
+                <button className="btn-primary small" disabled={renameSaving} onClick={() => saveRename(g.id)}>
+                  {renameSaving ? 'Saving…' : 'Save'}
+                </button>
+                <button className="btn-ghost small" onClick={cancelRename}>Cancel</button>
+              </div>
+            ) : (
+              <div key={g.id} className="list-item" style={{ gap: 12, alignItems: 'center' }}>
+                <div style={{ flexShrink: 0 }}>
+                  <GameIcon game={g} size={48} />
+                </div>
+                <span className="item-name" style={{ flex: 1, fontSize: 16 }}>
+                  {g.name}
+                </span>
+                {canManage && (
+                  <div className="item-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      ref={(el) => { fileInputRefs.current[g.id] = el; }}
+                      onChange={(e) => handleIconUpload(g.id, e.target.files[0])}
+                    />
+                    <button className="btn-ghost small" onClick={() => startRename(g)}>Rename</button>
+                    <button
+                      className="btn-secondary small"
+                      disabled={uploadingId === g.id}
+                      onClick={() => fileInputRefs.current[g.id]?.click()}
+                    >
+                      {uploadingId === g.id ? 'Uploading…' : g.icon_path ? 'Replace Icon' : 'Upload Icon'}
+                    </button>
+                    {g.icon_path && (
+                      <button
+                        className="btn-ghost small"
+                        disabled={removingId === g.id}
+                        onClick={() => handleRemoveIcon(g.id)}
+                      >
+                        {removingId === g.id ? 'Removing…' : 'Remove Icon'}
+                      </button>
+                    )}
+                    <button className="btn-danger small" onClick={() => handleDelete(g.id)}>Delete</button>
+                  </div>
+                )}
+              </div>
+            )
+          )
         )}
       </div>
     </div>
