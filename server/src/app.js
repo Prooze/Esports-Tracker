@@ -118,6 +118,42 @@ app.use('/api/games',       gamesRoutes);
 app.use('/api/tournaments', tournamentsRoutes);
 app.use('/api/admin',       adminRoutes);
 
+// ─── Auto-sync organizer tournaments ─────────────────────────────────────────
+const { performOrganizerSync, extractOrganizerSlug } = adminRoutes;
+
+async function runAutoSync() {
+  try {
+    const freq = db.prepare("SELECT value FROM settings WHERE key = 'startgg_sync_frequency'").get()?.value;
+    if (!freq || freq === 'manual') return;
+
+    const lastSynced = db.prepare("SELECT value FROM settings WHERE key = 'startgg_last_synced'").get()?.value;
+    if (lastSynced) {
+      const hoursSince = (Date.now() - new Date(lastSynced).getTime()) / 3_600_000;
+      if (freq === 'daily'  && hoursSince < 24)  return;
+      if (freq === 'weekly' && hoursSince < 168) return;
+    }
+
+    const orgUrl = db.prepare("SELECT value FROM settings WHERE key = 'startgg_organizer_url'").get()?.value;
+    if (!orgUrl) return;
+    const slug = orgUrl.includes('start.gg') ? extractOrganizerSlug(orgUrl) : orgUrl;
+    if (!slug) return;
+
+    const token = db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get()?.value;
+    if (!token) return;
+
+    const result = await performOrganizerSync(slug, token);
+    const now = new Date().toISOString();
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('startgg_last_synced', now);
+    upsert.run('startgg_last_sync_result', JSON.stringify(result));
+    console.log('[auto-sync] Organizer sync complete:', result);
+  } catch (err) {
+    console.error('[auto-sync] Error:', err.message);
+  }
+}
+
+setInterval(runAutoSync, 60 * 60 * 1000); // check every hour
+
 provisionFirstAdmin().then(() => {
   app.listen(PORT, () => {
     console.log(`✓ Server running at http://localhost:${PORT}`);

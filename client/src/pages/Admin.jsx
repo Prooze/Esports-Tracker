@@ -447,7 +447,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
 }
 
 // ─── Games tab ────────────────────────────────────────────────────────────────
-function GamesTab({ games, authHeaders, onRefresh }) {
+function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('manage_games');
   const [name, setName] = useState('');
@@ -456,6 +456,41 @@ function GamesTab({ games, authHeaders, onRefresh }) {
   const [uploadingId, setUploadingId] = useState(null);
   const [removingId, setRemovingId] = useState(null);
   const fileInputRefs = useRef({});
+
+  const [approveModal, setApproveModal] = useState(null);
+  const [approveForm, setApproveForm] = useState({ game_name: '', icon_emoji: '🎮' });
+  const [approveLoading, setApproveLoading] = useState(false);
+  const [approveError, setApproveError] = useState('');
+
+  const handleOpenApprove = (pending) => {
+    setApproveModal(pending);
+    setApproveForm({ game_name: pending.game_name, icon_emoji: '🎮' });
+    setApproveError('');
+  };
+
+  const handleApprove = async () => {
+    setApproveLoading(true);
+    setApproveError('');
+    const res = await fetch(`${apiBase}/api/admin/startgg/pending-games/${approveModal.id}/approve`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(approveForm),
+    });
+    const data = await res.json();
+    setApproveLoading(false);
+    if (!res.ok) { setApproveError(data.error || 'Failed to add game'); return; }
+    setApproveModal(null);
+    onRefresh();
+  };
+
+  const handleDismiss = async (id) => {
+    if (!confirm('Remove this pending game entry?')) return;
+    await fetch(`${apiBase}/api/admin/startgg/pending-games/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    });
+    onRefresh();
+  };
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -516,6 +551,86 @@ function GamesTab({ games, authHeaders, onRefresh }) {
 
   return (
     <div className="tab-content">
+
+      {/* ── Pending games from organizer sync ── */}
+      {pendingGames.length > 0 && (
+        <div className="card" style={{ borderColor: 'var(--accent)' }}>
+          <h3 className="card-title" style={{ marginBottom: 6 }}>
+            Pending Games
+            <span className="tab-badge" style={{ marginLeft: 8 }}>{pendingGames.length}</span>
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12 }}>
+            Found during organizer sync — not yet in your game library. Review and add them.
+          </p>
+          <div className="list">
+            {pendingGames.map((p) => (
+              <div key={p.id} className="list-item">
+                <div className="item-info">
+                  <span className="item-name">{p.game_name}</span>
+                  <span className="item-sub">{p.tournament_name}</span>
+                  {p.event_date && (
+                    <span className="item-meta">
+                      {new Date(p.event_date + 'T12:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                </div>
+                <div className="item-actions">
+                  <button className="btn-primary small" onClick={() => handleOpenApprove(p)}>Add Game</button>
+                  <button className="btn-ghost small" onClick={() => handleDismiss(p.id)}>Dismiss</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Approve modal ── */}
+      {approveModal && (
+        <div className="modal-overlay" onClick={() => setApproveModal(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 className="card-title" style={{ marginBottom: 0 }}>Add Game</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              From: <strong>{approveModal.tournament_name}</strong><br />
+              All pending tournaments for this game name will be added to Upcoming automatically.
+            </p>
+            <div className="form-row">
+              <div className="form-group" style={{ width: 72 }}>
+                <label>Emoji</label>
+                <input
+                  value={approveForm.icon_emoji}
+                  onChange={(e) => setApproveForm(f => ({ ...f, icon_emoji: e.target.value }))}
+                  maxLength={4}
+                  style={{ textAlign: 'center', fontSize: 20 }}
+                />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Game Name</label>
+                <input
+                  value={approveForm.game_name}
+                  onChange={(e) => setApproveForm(f => ({ ...f, game_name: e.target.value }))}
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+            <small style={{ color: 'var(--text-dim)', marginTop: -4 }}>
+              You can upload a game icon image after adding from the list below.
+            </small>
+            {approveError && <div className="error-msg">{approveError}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn-primary"
+                onClick={handleApprove}
+                disabled={approveLoading || !approveForm.game_name.trim()}
+              >
+                {approveLoading ? 'Adding…' : 'Add Game & Approve Tournaments'}
+              </button>
+              <button className="btn-ghost" onClick={() => setApproveModal(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {canManage && <form onSubmit={handleAdd} className="card">
         <h3 className="card-title">Add Game</h3>
         <div className="form-row">
@@ -910,6 +1025,11 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
+  const [organizerUrl, setOrganizerUrl] = useState('');
+  const [syncFrequency, setSyncFrequency] = useState('manual');
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+
   const fetchIntegrations = useCallback(async () => {
     setLoadError('');
     try {
@@ -918,6 +1038,9 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
       const data = await res.json();
       setIntegrations(data);
       setCloudName(data.cloudinary_cloud_name || '');
+      setOrganizerUrl(data.startgg_organizer_url || '');
+      setSyncFrequency(data.startgg_sync_frequency || 'manual');
+      if (data.startgg_last_sync_result) setSyncResult(data.startgg_last_sync_result);
     } catch (err) {
       setLoadError(err.message);
     }
@@ -932,7 +1055,11 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
     setSaved(false);
     setSaveError('');
 
-    const body = { cloudinary_cloud_name: cloudName };
+    const body = {
+      cloudinary_cloud_name:   cloudName,
+      startgg_organizer_url:   organizerUrl,
+      startgg_sync_frequency:  syncFrequency,
+    };
     if (apiKey)       body.cloudinary_api_key    = apiKey;
     if (apiSecret)    body.cloudinary_api_secret = apiSecret;
     if (startggToken) body.startgg_token         = startggToken;
@@ -956,6 +1083,21 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
       const data = await res.json();
       setSaveError(data.error || 'Save failed');
     }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    const res = await fetch(`${apiBase}/api/admin/startgg/sync-organizer`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ url: organizerUrl }),
+    });
+    const data = await res.json();
+    setSyncing(false);
+    setSyncResult(data);
+    fetchIntegrations();
+    onRefresh();
   };
 
   const handleTest = async () => {
@@ -1072,6 +1214,59 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
           {integrations.startgg_token_set && (
             <div className="success-msg" style={{ fontSize: 12 }}>✓ Token is currently configured</div>
           )}
+        </div>
+
+        {/* ── Organizer Sync ── */}
+        <div className="card">
+          <h3 className="card-title">Organizer Sync</h3>
+          <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16 }}>
+            Automatically pull upcoming tournaments from a start.gg organizer profile.
+            Unknown games are held as pending for review in the Games tab.
+          </p>
+          <div className="form-group">
+            <label>Organizer URL</label>
+            <input
+              value={organizerUrl}
+              onChange={(e) => setOrganizerUrl(e.target.value)}
+              placeholder="https://www.start.gg/user/your-username"
+              autoComplete="off"
+            />
+            <small>Paste your start.gg user or org profile URL</small>
+          </div>
+          <div className="form-group">
+            <label>Sync Frequency</label>
+            <select value={syncFrequency} onChange={(e) => setSyncFrequency(e.target.value)}>
+              <option value="manual">Manual only</option>
+              <option value="daily">Daily (auto-syncs every 24 h)</option>
+              <option value="weekly">Weekly (auto-syncs every 7 days)</option>
+            </select>
+          </div>
+          {integrations.startgg_last_synced && (
+            <div className="dim" style={{ fontSize: 11, marginBottom: 12 }}>
+              Last synced: {new Date(integrations.startgg_last_synced).toLocaleString()}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleSync}
+              disabled={syncing || !organizerUrl.trim() || !integrations.startgg_token_set}
+              title={!integrations.startgg_token_set ? 'Configure a start.gg API token first' : undefined}
+            >
+              {syncing ? 'Syncing…' : 'Sync Now'}
+            </button>
+            {syncResult && (
+              <span
+                className={syncResult.error ? 'error-msg' : 'success-msg'}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                {syncResult.error
+                  ? `✗ ${syncResult.error}`
+                  : `✓ ${syncResult.added ?? 0} added, ${syncResult.pending ?? 0} pending, ${syncResult.skipped ?? 0} skipped`}
+              </span>
+            )}
+          </div>
         </div>
 
         {saveError && <div className="error-msg">{saveError}</div>}
@@ -1665,6 +1860,7 @@ function AdminPanel() {
   const [upcoming, setUpcoming] = useState([]);
   const [settings, setSettings] = useState({});
   const [accounts, setAccounts] = useState([]);
+  const [pendingGames, setPendingGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -1692,6 +1888,15 @@ function AdminPanel() {
       setUpcoming(Array.isArray(u) ? u : []);
       setSettings(s && typeof s === 'object' ? s : {});
       setAccounts(Array.isArray(a) ? a : []);
+
+      // Pending games — only available to manage_games; ignore 403
+      try {
+        const pgRes = await fetch(`${apiBase}/api/admin/startgg/pending-games`, { headers: authHeaders });
+        if (pgRes.ok) {
+          const pg = await pgRes.json();
+          setPendingGames(Array.isArray(pg) ? pg : []);
+        }
+      } catch (_) {}
     } catch (err) {
       setLoadError(err.message || 'Failed to load admin data. Is the server running?');
     } finally {
@@ -1727,6 +1932,9 @@ function AdminPanel() {
             onClick={() => setTab(t)}
           >
             {t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'games' && pendingGames.length > 0 && (
+              <span className="tab-badge" style={{ marginLeft: 6 }}>{pendingGames.length}</span>
+            )}
           </button>
         ))}
       </div>
@@ -1740,7 +1948,7 @@ function AdminPanel() {
         />
       )}
       {tab === 'games' && (
-        <GamesTab games={games} authHeaders={authHeaders} onRefresh={fetchData} />
+        <GamesTab games={games} pendingGames={pendingGames} authHeaders={authHeaders} onRefresh={fetchData} />
       )}
       {tab === 'accounts' && (
         <AccountsTab

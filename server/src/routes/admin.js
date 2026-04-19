@@ -264,6 +264,97 @@ function extractSlug(url) {
   return m ? m[1] : null;
 }
 
+function extractOrganizerSlug(url) {
+  const m = url.match(/start\.gg\/(?:user|org)\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+async function performOrganizerSync(slug, token) {
+  const data = await startggQuery(
+    `query OrganizerTournaments($slug: String!) {
+      user(slug: $slug) {
+        tournaments(query: {
+          filter: {
+            upcoming: true
+            tournamentView: "admin"
+          }
+        }) {
+          nodes {
+            id
+            name
+            slug
+            startAt
+            events {
+              id
+              name
+              videogame {
+                id
+                name
+              }
+            }
+          }
+        }
+      }
+    }`,
+    { slug },
+    token
+  );
+
+  const tournaments = data.user?.tournaments?.nodes ?? [];
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+  let gamesMatched = 0;
+  let upcomingAdded = 0;
+  let pendingCreated = 0;
+
+  for (const tournament of tournaments) {
+    const tournamentUrl = `https://start.gg/tournament/${tournament.slug}`;
+    const eventDate = tournament.startAt
+      ? new Date(tournament.startAt * 1000).toISOString().split('T')[0]
+      : null;
+
+    const seenGames = new Set();
+
+    for (const event of (tournament.events || [])) {
+      const gameName = event.videogame?.name;
+      if (!gameName || seenGames.has(gameName.toLowerCase())) continue;
+      seenGames.add(gameName.toLowerCase());
+
+      const game = db.prepare('SELECT * FROM games WHERE lower(name) = lower(?)').get(gameName);
+
+      if (game) {
+        gamesMatched++;
+        const alreadyExists = db.prepare(
+          'SELECT id FROM upcoming_tournaments WHERE startgg_url = ? AND game_id = ?'
+        ).get(tournamentUrl, game.id);
+        if (!alreadyExists) {
+          db.prepare(
+            'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
+          ).run(tournament.name, game.id, eventDate, tournamentUrl);
+          upcomingAdded++;
+        }
+      } else {
+        const alreadyPending = db.prepare(
+          'SELECT id FROM pending_games WHERE lower(game_name) = lower(?) AND tournament_name = ?'
+        ).get(gameName, tournament.name);
+        if (!alreadyPending) {
+          db.prepare(
+            'INSERT INTO pending_games (game_name, tournament_name, startgg_tournament_url, event_date) VALUES (?, ?, ?, ?)'
+          ).run(gameName, tournament.name, tournamentUrl, eventDate);
+          pendingCreated++;
+        }
+      }
+    }
+  }
+
+  return {
+    tournaments_found: tournaments.length,
+    games_matched:     gamesMatched,
+    upcoming_added:    upcomingAdded,
+    pending_games:     pendingCreated,
+  };
+}
+
 router.post('/startgg/lookup', checkPermission('manage_tournaments'), async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
@@ -354,6 +445,81 @@ router.post('/startgg/import', checkPermission('manage_tournaments'), async (req
   }
 });
 
+// ─── Organizer sync ───────────────────────────────────────────────────────────
+router.post('/startgg/sync-organizer', checkPermission('manage_integrations'), async (req, res) => {
+  let { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
+
+  const slug = url.includes('start.gg') ? extractOrganizerSlug(url) : url;
+  if (!slug) return res.status(400).json({ error: 'Could not parse organizer slug from URL' });
+
+  const tokenRow = db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get();
+  if (!tokenRow?.value) {
+    return res.status(400).json({ error: 'No start.gg API token configured — set it in Integrations' });
+  }
+
+  try {
+    const result = await performOrganizerSync(slug, tokenRow.value);
+    const now = new Date().toISOString();
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('startgg_last_synced', now);
+    upsert.run('startgg_last_sync_result', JSON.stringify(result));
+    res.json({ ...result, synced_at: now });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/startgg/pending-games', checkPermission('manage_games'), (req, res) => {
+  const rows = db.prepare('SELECT * FROM pending_games ORDER BY created_at DESC').all();
+  res.json(rows);
+});
+
+router.post('/startgg/pending-games/:id/approve', checkPermission('manage_games'), async (req, res) => {
+  const pending = db.prepare('SELECT * FROM pending_games WHERE id = ?').get(req.params.id);
+  if (!pending) return res.status(404).json({ error: 'Pending game not found' });
+
+  const { game_name = pending.game_name, icon_emoji = '🎮' } = req.body;
+  if (!game_name?.trim()) return res.status(400).json({ error: 'game_name is required' });
+
+  // Create the game
+  const gameResult = db.prepare(
+    'INSERT INTO games (name, icon_emoji) VALUES (?, ?)'
+  ).run(game_name.trim(), icon_emoji);
+  const gameId = gameResult.lastInsertRowid;
+
+  // Approve ALL pending entries for the same game name (case-insensitive)
+  const siblings = db.prepare(
+    'SELECT * FROM pending_games WHERE lower(game_name) = lower(?)'
+  ).all(pending.game_name);
+
+  let added = 0;
+  for (const p of siblings) {
+    const exists = db.prepare(
+      'SELECT id FROM upcoming_tournaments WHERE startgg_url = ? AND game_id = ?'
+    ).get(p.startgg_tournament_url, gameId);
+    if (!exists) {
+      db.prepare(
+        'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
+      ).run(p.tournament_name, gameId, p.event_date, p.startgg_tournament_url);
+      added++;
+    }
+  }
+
+  db.prepare('DELETE FROM pending_games WHERE lower(game_name) = lower(?)').run(pending.game_name);
+
+  res.status(201).json({
+    success: true,
+    game: db.prepare('SELECT * FROM games WHERE id = ?').get(gameId),
+    tournaments_added: added,
+  });
+});
+
+router.delete('/startgg/pending-games/:id', checkPermission('manage_games'), (req, res) => {
+  db.prepare('DELETE FROM pending_games WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 // ─── Upcoming tournaments ─────────────────────────────────────────────────────
 router.get('/upcoming', (req, res) => {
   const rows = db.prepare(`
@@ -415,29 +581,44 @@ router.get('/integrations', checkPermission('manage_integrations'), (req, res) =
   const keys = [
     'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
     'cloudinary_last_tested', 'cloudinary_test_ok', 'startgg_token',
+    'startgg_organizer_url', 'startgg_sync_frequency',
+    'startgg_last_synced', 'startgg_last_sync_result',
   ];
   const raw = {};
   for (const key of keys) {
     raw[key] = db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value || '';
   }
+
+  let lastSyncResult = null;
+  try { if (raw.startgg_last_sync_result) lastSyncResult = JSON.parse(raw.startgg_last_sync_result); } catch (_) {}
+
   res.json({
-    cloudinary_cloud_name:    raw.cloudinary_cloud_name,
-    cloudinary_api_key_set:   !!raw.cloudinary_api_key,
+    cloudinary_cloud_name:     raw.cloudinary_cloud_name,
+    cloudinary_api_key_set:    !!raw.cloudinary_api_key,
     cloudinary_api_secret_set: !!raw.cloudinary_api_secret,
-    cloudinary_last_tested:   raw.cloudinary_last_tested,
-    cloudinary_test_ok:       raw.cloudinary_test_ok,
-    startgg_token_set:        !!raw.startgg_token,
+    cloudinary_last_tested:    raw.cloudinary_last_tested,
+    cloudinary_test_ok:        raw.cloudinary_test_ok,
+    startgg_token_set:         !!raw.startgg_token,
+    startgg_organizer_url:     raw.startgg_organizer_url,
+    startgg_sync_frequency:    raw.startgg_sync_frequency || 'manual',
+    startgg_last_synced:       raw.startgg_last_synced,
+    startgg_last_sync_result:  lastSyncResult,
   });
 });
 
 router.put('/integrations', checkPermission('manage_integrations'), (req, res) => {
-  const { cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret, startgg_token } = req.body;
+  const {
+    cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret, startgg_token,
+    startgg_organizer_url, startgg_sync_frequency,
+  } = req.body;
   const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 
   if (cloudinary_cloud_name !== undefined) upsert.run('cloudinary_cloud_name', cloudinary_cloud_name);
   if (cloudinary_api_key)    upsert.run('cloudinary_api_key',    cloudinary_api_key);
   if (cloudinary_api_secret) upsert.run('cloudinary_api_secret', cloudinary_api_secret);
   if (startgg_token)         upsert.run('startgg_token',         startgg_token);
+  if (startgg_organizer_url  !== undefined) upsert.run('startgg_organizer_url',  startgg_organizer_url);
+  if (startgg_sync_frequency !== undefined) upsert.run('startgg_sync_frequency', startgg_sync_frequency);
 
   res.json({ success: true });
 });
@@ -521,3 +702,5 @@ router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_br
 });
 
 module.exports = router;
+module.exports.performOrganizerSync = performOrganizerSync;
+module.exports.extractOrganizerSlug = extractOrganizerSlug;

@@ -65,11 +65,19 @@ db.exec(`
   );
 `);
 
-// Migrations — each wrapped in try/catch so they're skipped if the column exists
+// Migrations — each wrapped in try/catch so they're skipped if already done
 const migrations = [
   `ALTER TABLE games   ADD COLUMN icon_path    TEXT`,
   `ALTER TABLE admins  ADD COLUMN permissions  TEXT NOT NULL DEFAULT '[]'`,
   `ALTER TABLE admins  ADD COLUMN is_superadmin INTEGER NOT NULL DEFAULT 0`,
+  `CREATE TABLE IF NOT EXISTS pending_games (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_name             TEXT NOT NULL,
+    tournament_name       TEXT NOT NULL,
+    startgg_tournament_url TEXT,
+    event_date            TEXT,
+    created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (_) {}
