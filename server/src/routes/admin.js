@@ -16,7 +16,14 @@ const iconUpload = makeUpload(
 );
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const VALID_PERMISSIONS = ['manage_games', 'manage_tournaments', 'manage_accounts'];
+const VALID_PERMISSIONS = [
+  'manage_games',
+  'manage_tournaments',
+  'manage_upcoming',
+  'manage_branding',
+  'manage_integrations',
+  'manage_accounts',
+];
 
 function formatAccount(row) {
   return {
@@ -358,7 +365,7 @@ router.get('/upcoming', (req, res) => {
   res.json(rows);
 });
 
-router.post('/upcoming', checkPermission('manage_tournaments'), (req, res) => {
+router.post('/upcoming', checkPermission('manage_upcoming'), (req, res) => {
   const { name, game_id, event_date, location, startgg_url, description } = req.body;
   if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
 
@@ -369,7 +376,7 @@ router.post('/upcoming', checkPermission('manage_tournaments'), (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(result.lastInsertRowid));
 });
 
-router.put('/upcoming/:id', checkPermission('manage_tournaments'), (req, res) => {
+router.put('/upcoming/:id', checkPermission('manage_upcoming'), (req, res) => {
   const { id } = req.params;
   const { name, game_id, event_date, location, startgg_url, description } = req.body;
   if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
@@ -381,29 +388,82 @@ router.put('/upcoming/:id', checkPermission('manage_tournaments'), (req, res) =>
   res.json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(id));
 });
 
-router.delete('/upcoming/:id', checkPermission('manage_tournaments'), (req, res) => {
+router.delete('/upcoming/:id', checkPermission('manage_upcoming'), (req, res) => {
   db.prepare('DELETE FROM upcoming_tournaments WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
+const SENSITIVE_SETTINGS = ['startgg_token', 'cloudinary_api_key', 'cloudinary_api_secret'];
+
 router.get('/settings', (req, res) => {
   const rows = db.prepare('SELECT * FROM settings').all();
   const result = {};
   for (const { key, value } of rows) result[key] = value;
-  if (result.startgg_token) result.startgg_token_set = true;
-  delete result.startgg_token;
+  // Strip all sensitive keys — accessible via /integrations instead
+  for (const key of SENSITIVE_SETTINGS) delete result[key];
   res.json(result);
 });
 
+// General settings PUT kept for compatibility but integration fields moved to /integrations
 router.put('/settings', (req, res) => {
-  const { startgg_token } = req.body;
-  if (startgg_token !== undefined) {
-    db.prepare(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES ('startgg_token', ?)"
-    ).run(startgg_token);
-  }
   res.json({ success: true });
+});
+
+// ─── Integrations ─────────────────────────────────────────────────────────────
+router.get('/integrations', checkPermission('manage_integrations'), (req, res) => {
+  const keys = [
+    'cloudinary_cloud_name', 'cloudinary_api_key', 'cloudinary_api_secret',
+    'cloudinary_last_tested', 'cloudinary_test_ok', 'startgg_token',
+  ];
+  const raw = {};
+  for (const key of keys) {
+    raw[key] = db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value || '';
+  }
+  res.json({
+    cloudinary_cloud_name:    raw.cloudinary_cloud_name,
+    cloudinary_api_key_set:   !!raw.cloudinary_api_key,
+    cloudinary_api_secret_set: !!raw.cloudinary_api_secret,
+    cloudinary_last_tested:   raw.cloudinary_last_tested,
+    cloudinary_test_ok:       raw.cloudinary_test_ok,
+    startgg_token_set:        !!raw.startgg_token,
+  });
+});
+
+router.put('/integrations', checkPermission('manage_integrations'), (req, res) => {
+  const { cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret, startgg_token } = req.body;
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+  if (cloudinary_cloud_name !== undefined) upsert.run('cloudinary_cloud_name', cloudinary_cloud_name);
+  if (cloudinary_api_key)    upsert.run('cloudinary_api_key',    cloudinary_api_key);
+  if (cloudinary_api_secret) upsert.run('cloudinary_api_secret', cloudinary_api_secret);
+  if (startgg_token)         upsert.run('startgg_token',         startgg_token);
+
+  res.json({ success: true });
+});
+
+router.post('/integrations/test-cloudinary', checkPermission('manage_integrations'), async (req, res) => {
+  const { cloudinary: cld, getConfig, isConfigured } = require('../lib/cloudinary');
+
+  const cfg = getConfig();
+  if (!isConfigured(cfg)) {
+    return res.status(400).json({ ok: false, error: 'Cloudinary credentials are not configured' });
+  }
+
+  const now = new Date().toISOString();
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+  try {
+    cld.config(cfg);
+    await cld.api.ping();
+    upsert.run('cloudinary_last_tested', now);
+    upsert.run('cloudinary_test_ok', 'true');
+    res.json({ ok: true, tested_at: now });
+  } catch (err) {
+    upsert.run('cloudinary_last_tested', now);
+    upsert.run('cloudinary_test_ok', 'false');
+    res.status(400).json({ ok: false, error: err.message, tested_at: now });
+  }
 });
 
 // ─── Branding settings ────────────────────────────────────────────────────────
@@ -418,7 +478,7 @@ const BRANDING_TEXT_KEYS = [
   'footer_links', 'social_links', 'announcement_text', 'announcement_active',
 ];
 
-router.put('/settings/branding', checkPermission('manage_games'), (req, res) => {
+router.put('/settings/branding', checkPermission('manage_branding'), (req, res) => {
   const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
 
   for (const key of BRANDING_TEXT_KEYS) {
@@ -432,7 +492,7 @@ router.put('/settings/branding', checkPermission('manage_games'), (req, res) => 
   res.json({ success: true });
 });
 
-router.post('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), (req, res) => {
+router.post('/settings/:type(logo|favicon|banner)', checkPermission('manage_branding'), (req, res) => {
   brandingUpload.single('file')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -448,7 +508,7 @@ router.post('/settings/:type(logo|favicon|banner)', checkPermission('manage_game
   });
 });
 
-router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), async (req, res) => {
+router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_branding'), async (req, res) => {
   const settingKey = req.params.type === 'banner' ? 'hero_banner' : `site_${req.params.type}`;
   const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
   if (existing?.value) await destroyIfCloudinary(existing.value);

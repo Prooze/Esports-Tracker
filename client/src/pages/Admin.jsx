@@ -592,9 +592,12 @@ function GamesTab({ games, authHeaders, onRefresh }) {
 
 // ─── Accounts tab ────────────────────────────────────────────────────────────
 const PERMISSIONS = [
-  { key: 'manage_games',       label: 'Manage Games' },
-  { key: 'manage_tournaments', label: 'Manage Tournaments' },
-  { key: 'manage_accounts',    label: 'Manage Accounts' },
+  { key: 'manage_games',         label: 'Manage Games' },
+  { key: 'manage_tournaments',   label: 'Manage Tournaments' },
+  { key: 'manage_upcoming',      label: 'Manage Upcoming Tournaments' },
+  { key: 'manage_branding',      label: 'Manage Branding' },
+  { key: 'manage_integrations',  label: 'Manage Integrations' },
+  { key: 'manage_accounts',      label: 'Manage Accounts' },
 ];
 
 function PermCheckboxes({ value, onChange, editorUser, targetIsSuperAdmin, readOnly }) {
@@ -891,66 +894,194 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
   );
 }
 
-// ─── Settings tab ─────────────────────────────────────────────────────────────
-function SettingsTab({ settings, authHeaders, onRefresh }) {
+// ─── Integrations tab ─────────────────────────────────────────────────────────
+function IntegrationsTab({ authHeaders, onRefresh }) {
+  const [integrations, setIntegrations] = useState(null);
+  const [loadError, setLoadError] = useState('');
+
+  const [cloudName, setCloudName] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
   const [startggToken, setStartggToken] = useState('');
+
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const fetchIntegrations = useCallback(async () => {
+    setLoadError('');
+    try {
+      const res = await fetch(`${apiBase}/api/admin/integrations`, { headers: authHeaders });
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      setIntegrations(data);
+      setCloudName(data.cloudinary_cloud_name || '');
+    } catch (err) {
+      setLoadError(err.message);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => { fetchIntegrations(); }, [fetchIntegrations]);
 
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
     setSaved(false);
-    setError('');
+    setSaveError('');
 
-    const res = await fetch(`${apiBase}/api/admin/settings`, {
+    const body = { cloudinary_cloud_name: cloudName };
+    if (apiKey)       body.cloudinary_api_key    = apiKey;
+    if (apiSecret)    body.cloudinary_api_secret = apiSecret;
+    if (startggToken) body.startgg_token         = startggToken;
+
+    const res = await fetch(`${apiBase}/api/admin/integrations`, {
       method: 'PUT',
       headers: authHeaders,
-      body: JSON.stringify({ startgg_token: startggToken }),
+      body: JSON.stringify(body),
     });
 
     setSaving(false);
     if (res.ok) {
       setSaved(true);
+      setApiKey('');
+      setApiSecret('');
       setStartggToken('');
+      fetchIntegrations();
       onRefresh();
+      setTimeout(() => setSaved(false), 3000);
     } else {
       const data = await res.json();
-      setError(data.error);
+      setSaveError(data.error || 'Save failed');
     }
   };
 
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    const res = await fetch(`${apiBase}/api/admin/integrations/test-cloudinary`, {
+      method: 'POST',
+      headers: authHeaders,
+    });
+    const data = await res.json();
+    setTesting(false);
+    setTestResult(data);
+    fetchIntegrations();
+  };
+
+  if (!integrations && !loadError) return <div className="loading" style={{ padding: 24 }}>Loading…</div>;
+  if (loadError) return <div className="error-msg" style={{ margin: 24 }}>{loadError}</div>;
+
+  const isConnected = integrations.cloudinary_test_ok === 'true';
+  const hasCredentials = integrations.cloudinary_api_key_set && integrations.cloudinary_api_secret_set;
+
   return (
     <div className="tab-content">
-      <form onSubmit={handleSave} className="card" style={{ maxWidth: 520 }}>
-        <h3 className="card-title">API Configuration</h3>
+      <form onSubmit={handleSave}>
 
-        <div className="form-group">
-          <label>start.gg API Token</label>
-          <input
-            type="password"
-            value={startggToken}
-            onChange={(e) => setStartggToken(e.target.value)}
-            placeholder={settings.startgg_token_set ? '●●●●●●●● (token saved — paste new one to update)' : 'Paste your token here'}
-          />
-          <small>
-            Get your token at start.gg → Settings → Developer → Personal Access Tokens
+        {/* ── Cloudinary ── */}
+        <div className="card">
+          <div className="section-head" style={{ marginBottom: 12 }}>
+            <h3 className="card-title" style={{ marginBottom: 0 }}>Cloudinary</h3>
+            {integrations.cloudinary_last_tested && (
+              <span className={`badge ${isConnected ? 'badge-perm' : 'badge-none'}`}>
+                {isConnected ? 'Connected' : 'Not connected'}
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16 }}>
+            Used for storing uploaded images (logos, favicons, banners, game icons).
+            Without credentials, images are stored locally on the server.
+          </p>
+
+          {integrations.cloudinary_last_tested && (
+            <div className="dim" style={{ fontSize: 11, marginBottom: 12 }}>
+              Last tested: {new Date(integrations.cloudinary_last_tested).toLocaleString()}
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Cloud Name</label>
+            <input
+              value={cloudName}
+              onChange={(e) => setCloudName(e.target.value)}
+              placeholder="your-cloud-name"
+              autoComplete="off"
+            />
+          </div>
+          <div className="form-group">
+            <label>API Key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={integrations.cloudinary_api_key_set ? '●●●●●●●● (saved — paste new to update)' : 'Paste your API key'}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="form-group">
+            <label>API Secret</label>
+            <input
+              type="password"
+              value={apiSecret}
+              onChange={(e) => setApiSecret(e.target.value)}
+              placeholder={integrations.cloudinary_api_secret_set ? '●●●●●●●● (saved — paste new to update)' : 'Paste your API secret'}
+              autoComplete="new-password"
+            />
+          </div>
+          <small style={{ marginBottom: 12, display: 'block' }}>
+            Find these at cloudinary.com → Settings → Access Keys
           </small>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleTest}
+              disabled={testing || !hasCredentials}
+            >
+              {testing ? 'Testing…' : 'Test Connection'}
+            </button>
+            {testResult && (
+              <span
+                className={testResult.ok ? 'success-msg' : 'error-msg'}
+                style={{ padding: '4px 10px', fontSize: 12 }}
+              >
+                {testResult.ok ? '✓ Connected successfully' : `✗ ${testResult.error}`}
+              </span>
+            )}
+          </div>
         </div>
 
-        {settings.startgg_token_set && (
-          <div className="success-msg" style={{ fontSize: 12 }}>
-            ✓ Token is currently configured
+        {/* ── start.gg ── */}
+        <div className="card">
+          <h3 className="card-title">start.gg</h3>
+          <div className="form-group">
+            <label>API Token</label>
+            <input
+              type="password"
+              value={startggToken}
+              onChange={(e) => setStartggToken(e.target.value)}
+              placeholder={integrations.startgg_token_set ? '●●●●●●●● (token saved — paste new to update)' : 'Paste your token here'}
+              autoComplete="new-password"
+            />
+            <small>Get your token at start.gg → Settings → Developer → Personal Access Tokens</small>
           </div>
-        )}
+          {integrations.startgg_token_set && (
+            <div className="success-msg" style={{ fontSize: 12 }}>✓ Token is currently configured</div>
+          )}
+        </div>
 
-        {error && <div className="error-msg">{error}</div>}
-        {saved && <div className="success-msg">Token saved!</div>}
+        {saveError && <div className="error-msg">{saveError}</div>}
 
-        <button type="submit" className="btn-primary" disabled={saving || !startggToken}>
-          {saving ? 'Saving…' : 'Save Token'}
-        </button>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving ? 'Saving…' : 'Save Integration Settings'}
+          </button>
+          {saved && <span className="success-msg" style={{ padding: '6px 12px' }}>Saved!</span>}
+        </div>
       </form>
     </div>
   );
@@ -959,7 +1090,7 @@ function SettingsTab({ settings, authHeaders, onRefresh }) {
 // ─── Upcoming tournaments tab ─────────────────────────────────────────────────
 function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
   const { hasPermission } = useAuth();
-  const canManage = hasPermission('manage_tournaments');
+  const canManage = hasPermission('manage_upcoming');
 
   const BLANK = { name: '', game_id: '', event_date: '', location: '', startgg_url: '', description: '' };
   const [showForm, setShowForm] = useState(false);
@@ -1520,15 +1651,15 @@ function AdminPanel() {
 
   // Determine which tabs this admin can see
   const visibleTabs = [
-    hasPermission('manage_tournaments') && 'tournaments',
-    hasPermission('manage_tournaments') && 'upcoming',
-    hasPermission('manage_games')       && 'games',
-    hasPermission('manage_accounts')    && 'accounts',
-    'settings', // always visible
-    hasPermission('manage_games')       && 'branding',
+    hasPermission('manage_tournaments')  && 'tournaments',
+    hasPermission('manage_upcoming')     && 'upcoming',
+    hasPermission('manage_games')        && 'games',
+    hasPermission('manage_accounts')     && 'accounts',
+    hasPermission('manage_branding')     && 'branding',
+    hasPermission('manage_integrations') && 'integrations',
   ].filter(Boolean);
 
-  const [tab, setTab] = useState(() => visibleTabs[0] || 'settings');
+  const [tab, setTab] = useState(() => visibleTabs[0] || '');
   const [games, setGames] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
@@ -1619,14 +1750,14 @@ function AdminPanel() {
           onRefresh={fetchData}
         />
       )}
-      {tab === 'settings' && (
-        <SettingsTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
-      )}
       {tab === 'upcoming' && (
         <UpcomingTab upcoming={upcoming} games={games} authHeaders={authHeaders} onRefresh={fetchData} />
       )}
       {tab === 'branding' && (
         <BrandingTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
+      )}
+      {tab === 'integrations' && (
+        <IntegrationsTab authHeaders={authHeaders} onRefresh={fetchData} />
       )}
     </main>
   );

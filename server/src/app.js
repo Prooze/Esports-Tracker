@@ -54,6 +54,8 @@ app.get('/api/settings/public', (req, res) => {
 
   // Strip sensitive keys
   delete raw.startgg_token;
+  delete raw.cloudinary_api_key;
+  delete raw.cloudinary_api_secret;
 
   // Parse JSON fields
   let footer_links = [];
