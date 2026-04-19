@@ -8,7 +8,6 @@ import GameStandings from './pages/GameStandings';
 import Login from './pages/Login';
 import Admin from './pages/Admin';
 import { SocialIcon, SOCIAL_PLATFORMS } from './lib/socialIcons';
-import { apiBase } from './lib/api';
 
 function ProtectedRoute({ children }) {
   const { token } = useAuth();

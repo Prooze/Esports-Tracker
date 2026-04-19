@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
 import { useBranding } from '../context/BrandingContext';
-import { resolveImageUrl } from '../lib/api';
+import { apiBase, resolveImageUrl } from '../lib/api';
 
 function formatEventDate(dateStr) {
   if (!dateStr) return '';
