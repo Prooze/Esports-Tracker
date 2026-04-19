@@ -373,6 +373,45 @@ router.post('/startgg/import', checkPermission('manage_tournaments'), async (req
   }
 });
 
+// ─── Upcoming tournaments ─────────────────────────────────────────────────────
+router.get('/upcoming', (req, res) => {
+  const rows = db.prepare(`
+    SELECT u.*, g.name AS game_name, g.icon_emoji
+    FROM upcoming_tournaments u
+    LEFT JOIN games g ON u.game_id = g.id
+    ORDER BY u.event_date ASC
+  `).all();
+  res.json(rows);
+});
+
+router.post('/upcoming', checkPermission('manage_tournaments'), (req, res) => {
+  const { name, game_id, event_date, location, startgg_url, description } = req.body;
+  if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
+
+  const result = db.prepare(
+    'INSERT INTO upcoming_tournaments (name, game_id, event_date, location, startgg_url, description) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null);
+
+  res.status(201).json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(result.lastInsertRowid));
+});
+
+router.put('/upcoming/:id', checkPermission('manage_tournaments'), (req, res) => {
+  const { id } = req.params;
+  const { name, game_id, event_date, location, startgg_url, description } = req.body;
+  if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
+
+  db.prepare(
+    'UPDATE upcoming_tournaments SET name = ?, game_id = ?, event_date = ?, location = ?, startgg_url = ?, description = ? WHERE id = ?'
+  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null, id);
+
+  res.json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(id));
+});
+
+router.delete('/upcoming/:id', checkPermission('manage_tournaments'), (req, res) => {
+  db.prepare('DELETE FROM upcoming_tournaments WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 router.get('/settings', (req, res) => {
   const rows = db.prepare('SELECT * FROM settings').all();

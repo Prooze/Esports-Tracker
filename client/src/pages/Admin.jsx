@@ -956,6 +956,156 @@ function SettingsTab({ settings, authHeaders, onRefresh }) {
   );
 }
 
+// ─── Upcoming tournaments tab ─────────────────────────────────────────────────
+function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission('manage_tournaments');
+
+  const BLANK = { name: '', game_id: '', event_date: '', location: '', startgg_url: '', description: '' };
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(BLANK);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const resetForm = () => { setForm(BLANK); setError(''); setEditingId(null); setShowForm(false); };
+
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setForm({
+      name: t.name,
+      game_id: t.game_id ? String(t.game_id) : '',
+      event_date: t.event_date || '',
+      location: t.location || '',
+      startgg_url: t.startgg_url || '',
+      description: t.description || '',
+    });
+    setShowForm(true);
+    setError('');
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    const url = editingId
+      ? `${apiBase}/api/admin/upcoming/${editingId}`
+      : `${apiBase}/api/admin/upcoming`;
+    const method = editingId ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: authHeaders,
+      body: JSON.stringify({ ...form, game_id: form.game_id || null }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (!res.ok) { setError(data.error); return; }
+    resetForm();
+    onRefresh();
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('Delete this upcoming tournament?')) return;
+    await fetch(`${apiBase}/api/admin/upcoming/${id}`, { method: 'DELETE', headers: authHeaders });
+    onRefresh();
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+
+  return (
+    <div className="tab-content">
+      <div className="section-head">
+        <h3 className="card-title" style={{ marginBottom: 0 }}>
+          Upcoming Tournaments <span className="dim">({upcoming.length})</span>
+        </h3>
+        {canManage && !showForm && (
+          <button className="btn-ghost small" onClick={() => { setShowForm(true); setEditingId(null); setForm(BLANK); }}>
+            + Add Tournament
+          </button>
+        )}
+      </div>
+
+      {canManage && showForm && (
+        <form onSubmit={handleSubmit} className="card">
+          <h3 className="card-title">{editingId ? 'Edit Tournament' : 'New Upcoming Tournament'}</h3>
+          <div className="form-row" style={{ flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: '2 1 220px' }}>
+              <label>Tournament Name *</label>
+              <input value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} required />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 160px' }}>
+              <label>Game</label>
+              <select value={form.game_id} onChange={(e) => setForm(f => ({ ...f, game_id: e.target.value }))}>
+                <option value="">Select game…</option>
+                {games.map((g) => (
+                  <option key={g.id} value={String(g.id)}>{g.icon_emoji} {g.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ flex: '1 1 160px' }}>
+              <label>Date *</label>
+              <input type="date" value={form.event_date} onChange={(e) => setForm(f => ({ ...f, event_date: e.target.value }))} required />
+            </div>
+          </div>
+          <div className="form-row" style={{ flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: '1 1 200px' }}>
+              <label>Location / Venue</label>
+              <input value={form.location} onChange={(e) => setForm(f => ({ ...f, location: e.target.value }))} placeholder="e.g. LAN Center, City" />
+            </div>
+            <div className="form-group" style={{ flex: '2 1 260px' }}>
+              <label>start.gg URL <span className="dim">(optional)</span></label>
+              <input value={form.startgg_url} onChange={(e) => setForm(f => ({ ...f, startgg_url: e.target.value }))} placeholder="https://www.start.gg/tournament/…" />
+            </div>
+          </div>
+          <div className="form-group">
+            <label>Description <span className="dim">(optional)</span></label>
+            <input value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description…" />
+          </div>
+          {error && <div className="error-msg">{error}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Add Tournament'}
+            </button>
+            <button type="button" className="btn-ghost" onClick={resetForm}>Cancel</button>
+          </div>
+        </form>
+      )}
+
+      <div className="list">
+        {upcoming.length === 0 ? (
+          <div className="empty-state">No upcoming tournaments. Add one to display it on the public page.</div>
+        ) : (
+          upcoming.map((t) => (
+            <div key={t.id} className="list-item">
+              <div className="item-info">
+                <span className="item-name">{t.name}</span>
+                {t.game_name && <span className="item-sub">{t.icon_emoji} {t.game_name}</span>}
+                <span className="item-meta">
+                  {formatDate(t.event_date)}
+                  {t.location && ` · ${t.location}`}
+                  {t.startgg_url && ' · Register link set'}
+                </span>
+                {t.description && <span className="item-meta" style={{ marginTop: 2 }}>{t.description}</span>}
+              </div>
+              {canManage && (
+                <div className="item-actions">
+                  <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
+                  <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Branding tab ─────────────────────────────────────────────────────────────
 function parseJSON(val, fallback) {
   if (Array.isArray(val)) return val;
@@ -1371,6 +1521,7 @@ function AdminPanel() {
   // Determine which tabs this admin can see
   const visibleTabs = [
     hasPermission('manage_tournaments') && 'tournaments',
+    hasPermission('manage_tournaments') && 'upcoming',
     hasPermission('manage_games')       && 'games',
     hasPermission('manage_accounts')    && 'accounts',
     'settings', // always visible
@@ -1380,6 +1531,7 @@ function AdminPanel() {
   const [tab, setTab] = useState(() => visibleTabs[0] || 'settings');
   const [games, setGames] = useState([]);
   const [tournaments, setTournaments] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
   const [settings, setSettings] = useState({});
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1393,18 +1545,20 @@ function AdminPanel() {
   const fetchData = useCallback(async () => {
     setLoadError(null);
     try {
-      const [gRes, tRes, sRes, aRes] = await Promise.all([
+      const [gRes, tRes, sRes, aRes, uRes] = await Promise.all([
         fetch(`${apiBase}/api/admin/games`,       { headers: authHeaders }),
         fetch(`${apiBase}/api/admin/tournaments`, { headers: authHeaders }),
         fetch(`${apiBase}/api/admin/settings`,    { headers: authHeaders }),
         fetch(`${apiBase}/api/admin/accounts`,    { headers: authHeaders }),
+        fetch(`${apiBase}/api/admin/upcoming`,    { headers: authHeaders }),
       ]);
-      if (!gRes.ok || !tRes.ok || !sRes.ok || !aRes.ok) {
-        throw new Error(`Server error — status ${[gRes, tRes, sRes, aRes].map(r => r.status).join(', ')}`);
+      if (!gRes.ok || !tRes.ok || !sRes.ok || !aRes.ok || !uRes.ok) {
+        throw new Error(`Server error — status ${[gRes, tRes, sRes, aRes, uRes].map(r => r.status).join(', ')}`);
       }
-      const [g, t, s, a] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json()]);
+      const [g, t, s, a, u] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json(), uRes.json()]);
       setGames(Array.isArray(g) ? g : []);
       setTournaments(Array.isArray(t) ? t : []);
+      setUpcoming(Array.isArray(u) ? u : []);
       setSettings(s && typeof s === 'object' ? s : {});
       setAccounts(Array.isArray(a) ? a : []);
     } catch (err) {
@@ -1467,6 +1621,9 @@ function AdminPanel() {
       )}
       {tab === 'settings' && (
         <SettingsTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
+      )}
+      {tab === 'upcoming' && (
+        <UpcomingTab upcoming={upcoming} games={games} authHeaders={authHeaders} onRefresh={fetchData} />
       )}
       {tab === 'branding' && (
         <BrandingTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />

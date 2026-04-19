@@ -81,6 +81,19 @@ app.get('/api/settings/public', (req, res) => {
   });
 });
 
+// ─── Public upcoming tournaments (no auth) ───────────────────────────────────
+app.get('/api/upcoming', (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  const rows = db.prepare(`
+    SELECT u.*, g.name AS game_name, g.icon_emoji, g.icon_path
+    FROM upcoming_tournaments u
+    LEFT JOIN games g ON u.game_id = g.id
+    WHERE u.event_date >= ?
+    ORDER BY u.event_date ASC
+  `).all(today);
+  res.json(rows);
+});
+
 app.use('/api/auth',        authRoutes);
 app.use('/api/games',       gamesRoutes);
 app.use('/api/tournaments', tournamentsRoutes);

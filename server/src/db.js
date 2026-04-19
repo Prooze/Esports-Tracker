@@ -52,6 +52,17 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS upcoming_tournaments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    game_id     INTEGER REFERENCES games(id) ON DELETE SET NULL,
+    event_date  TEXT NOT NULL,
+    location    TEXT,
+    startgg_url TEXT,
+    description TEXT,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Migrations — each wrapped in try/catch so they're skipped if the column exists

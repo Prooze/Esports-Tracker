@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BrandingProvider, useBranding } from './context/BrandingContext';
 import Navbar from './components/Navbar';
@@ -60,10 +61,18 @@ function SiteFooter() {
 
 function AppRoutes() {
   const { branding } = useBranding();
+  const hasAnnouncement = branding.announcement_active && branding.announcement_text;
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--announcement-offset',
+      hasAnnouncement ? '36px' : '0px'
+    );
+  }, [hasAnnouncement]);
 
   return (
     <>
-      {branding.announcement_active && branding.announcement_text && (
+      {hasAnnouncement && (
         <div className="announcement-bar" role="banner">
           {branding.announcement_text}
         </div>
