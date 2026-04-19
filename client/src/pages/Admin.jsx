@@ -461,11 +461,20 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   const [approveForm, setApproveForm] = useState({ game_name: '', icon_emoji: '🎮' });
   const [approveLoading, setApproveLoading] = useState(false);
   const [approveError, setApproveError] = useState('');
+  const [approveIconFile, setApproveIconFile] = useState(null);
+  const [approveIconPreview, setApproveIconPreview] = useState('');
+  const approveIconInputRef = useRef(null);
+
+  const [addIconFile, setAddIconFile] = useState(null);
+  const [addIconPreview, setAddIconPreview] = useState('');
+  const addIconInputRef = useRef(null);
 
   const handleOpenApprove = (pending) => {
     setApproveModal(pending);
     setApproveForm({ game_name: pending.game_name, icon_emoji: '🎮' });
     setApproveError('');
+    setApproveIconFile(null);
+    setApproveIconPreview('');
   };
 
   const handleApprove = async () => {
@@ -474,12 +483,27 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
     const res = await fetch(`${apiBase}/api/admin/startgg/pending-games/${approveModal.id}/approve`, {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify(approveForm),
+      body: JSON.stringify({ game_name: approveForm.game_name, icon_emoji: approveForm.icon_emoji }),
     });
     const data = await res.json();
+    if (!res.ok) {
+      setApproveError(data.error || 'Failed to add game');
+      setApproveLoading(false);
+      return;
+    }
+    if (approveIconFile && data.game?.id) {
+      const formData = new FormData();
+      formData.append('icon', approveIconFile);
+      await fetch(`${apiBase}/api/admin/games/${data.game.id}/icon`, {
+        method: 'POST',
+        headers: { Authorization: authHeaders.Authorization },
+        body: formData,
+      });
+    }
     setApproveLoading(false);
-    if (!res.ok) { setApproveError(data.error || 'Failed to add game'); return; }
     setApproveModal(null);
+    setApproveIconFile(null);
+    setApproveIconPreview('');
     onRefresh();
   };
 
@@ -502,8 +526,20 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
     });
     const data = await res.json();
     if (!res.ok) { setError(data.error); return; }
+    if (addIconFile && data.id) {
+      const formData = new FormData();
+      formData.append('icon', addIconFile);
+      await fetch(`${apiBase}/api/admin/games/${data.id}/icon`, {
+        method: 'POST',
+        headers: { Authorization: authHeaders.Authorization },
+        body: formData,
+      });
+    }
     setName('');
     setEmoji('🎮');
+    setAddIconFile(null);
+    setAddIconPreview('');
+    if (addIconInputRef.current) addIconInputRef.current.value = '';
     onRefresh();
   };
 
@@ -588,22 +624,13 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
       {approveModal && (
         <div className="modal-overlay" onClick={() => setApproveModal(null)}>
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <h3 className="card-title" style={{ marginBottom: 0 }}>Add Game</h3>
-            <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Add Game</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 12 }}>
               From: <strong>{approveModal.tournament_name}</strong><br />
               All pending tournaments for this game name will be added to Upcoming automatically.
             </p>
-            <div className="form-row">
-              <div className="form-group" style={{ width: 72 }}>
-                <label>Emoji</label>
-                <input
-                  value={approveForm.icon_emoji}
-                  onChange={(e) => setApproveForm(f => ({ ...f, icon_emoji: e.target.value }))}
-                  maxLength={4}
-                  style={{ textAlign: 'center', fontSize: 20 }}
-                />
-              </div>
-              <div className="form-group" style={{ flex: 1 }}>
+            <div className="form-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div className="form-group" style={{ flex: '2 1 160px' }}>
                 <label>Game Name</label>
                 <input
                   value={approveForm.game_name}
@@ -612,12 +639,57 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
                   autoFocus
                 />
               </div>
+              <div className="form-group" style={{ width: 72, flexShrink: 0 }}>
+                <label>Emoji</label>
+                <input
+                  value={approveForm.icon_emoji}
+                  onChange={(e) => setApproveForm(f => ({ ...f, icon_emoji: e.target.value }))}
+                  maxLength={4}
+                  style={{ textAlign: 'center', fontSize: 20 }}
+                />
+              </div>
             </div>
-            <small style={{ color: 'var(--text-dim)', marginTop: -4 }}>
-              You can upload a game icon image after adding from the list below.
-            </small>
+            <div className="form-group">
+              <label>Icon Image <span className="dim">(optional — replaces emoji)</span></label>
+              <input
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                ref={approveIconInputRef}
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  setApproveIconFile(file);
+                  setApproveIconPreview(URL.createObjectURL(file));
+                }}
+              />
+              <div
+                className="upload-area"
+                style={{ minHeight: 64, cursor: 'pointer' }}
+                onClick={() => approveIconInputRef.current?.click()}
+              >
+                {approveIconPreview
+                  ? <img src={approveIconPreview} alt="preview" style={{ height: 52, objectFit: 'contain' }} />
+                  : <span className="dim" style={{ fontSize: 12 }}>Click to upload…</span>
+                }
+              </div>
+              {approveIconPreview && (
+                <button
+                  type="button"
+                  className="btn-ghost small"
+                  style={{ marginTop: 4 }}
+                  onClick={() => {
+                    setApproveIconFile(null);
+                    setApproveIconPreview('');
+                    if (approveIconInputRef.current) approveIconInputRef.current.value = '';
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
             {approveError && <div className="error-msg">{approveError}</div>}
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
               <button
                 className="btn-primary"
                 onClick={handleApprove}
@@ -633,17 +705,8 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
 
       {canManage && <form onSubmit={handleAdd} className="card">
         <h3 className="card-title">Add Game</h3>
-        <div className="form-row">
-          <div className="form-group" style={{ width: 72 }}>
-            <label>Emoji</label>
-            <input
-              value={emoji}
-              onChange={(e) => setEmoji(e.target.value)}
-              maxLength={4}
-              style={{ textAlign: 'center', fontSize: 20 }}
-            />
-          </div>
-          <div className="form-group" style={{ flex: 1 }}>
+        <div className="form-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div className="form-group" style={{ flex: '2 1 200px' }}>
             <label>Game Name *</label>
             <input
               value={name}
@@ -652,7 +715,58 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
               required
             />
           </div>
+          <div className="form-group" style={{ width: 72, flexShrink: 0 }}>
+            <label>Emoji</label>
+            <input
+              value={emoji}
+              onChange={(e) => setEmoji(e.target.value)}
+              maxLength={4}
+              style={{ textAlign: 'center', fontSize: 20 }}
+            />
+          </div>
+          <div className="form-group" style={{ flex: '1 1 140px' }}>
+            <label>Icon Image <span className="dim">(optional)</span></label>
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              ref={addIconInputRef}
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setAddIconFile(file);
+                setAddIconPreview(URL.createObjectURL(file));
+              }}
+            />
+            <div
+              className="upload-area"
+              style={{ minHeight: 56, cursor: 'pointer' }}
+              onClick={() => addIconInputRef.current?.click()}
+            >
+              {addIconPreview
+                ? <img src={addIconPreview} alt="preview" style={{ height: 44, objectFit: 'contain' }} />
+                : <span className="dim" style={{ fontSize: 12 }}>Click to upload…</span>
+              }
+            </div>
+            {addIconPreview && (
+              <button
+                type="button"
+                className="btn-ghost small"
+                style={{ marginTop: 4 }}
+                onClick={() => {
+                  setAddIconFile(null);
+                  setAddIconPreview('');
+                  if (addIconInputRef.current) addIconInputRef.current.value = '';
+                }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
         </div>
+        <small style={{ color: 'var(--text-dim)', marginBottom: 8, display: 'block' }}>
+          {addIconPreview ? 'Image will be uploaded when you add the game.' : 'No image? The emoji is used as the fallback icon.'}
+        </small>
         {error && <div className="error-msg">{error}</div>}
         <button type="submit" className="btn-primary">Add Game</button>
       </form>}
