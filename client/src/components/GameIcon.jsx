@@ -1,10 +1,10 @@
-import { apiBase } from '../lib/api';
+import { resolveImageUrl } from '../lib/api';
 
 export default function GameIcon({ game, size = 64 }) {
   if (game.icon_path) {
     return (
       <img
-        src={`${apiBase}${game.icon_path}`}
+        src={resolveImageUrl(game.icon_path)}
         alt={game.name}
         style={{
           width: size,

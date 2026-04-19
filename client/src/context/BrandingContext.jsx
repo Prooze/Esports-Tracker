@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { apiBase } from '../lib/api';
+import { apiBase, resolveImageUrl } from '../lib/api';
 
 const BrandingContext = createContext(null);
 
@@ -45,7 +45,7 @@ function applyBrandingVars(branding) {
       link.rel = 'icon';
       document.head.appendChild(link);
     }
-    link.href = `${apiBase}${branding.site_favicon}`;
+    link.href = resolveImageUrl(branding.site_favicon);
   }
 }
 

@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
-import { apiBase } from '../lib/api';
+import { resolveImageUrl } from '../lib/api';
 
 export default function Navbar() {
   const { token, user, logout } = useAuth();
@@ -15,7 +15,7 @@ export default function Navbar() {
 
   const logoContent = branding.site_logo ? (
     <img
-      src={`${apiBase}${branding.site_logo}`}
+      src={resolveImageUrl(branding.site_logo)}
       alt={branding.site_name || 'Logo'}
       style={{ height: 34, width: 'auto', objectFit: 'contain', display: 'block' }}
     />

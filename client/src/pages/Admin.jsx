@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Component } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import GameIcon from '../components/GameIcon';
-import { apiBase } from '../lib/api';
+import { apiBase, resolveImageUrl } from '../lib/api';
 import { SOCIAL_PLATFORMS, SocialIcon } from '../lib/socialIcons';
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
@@ -1114,7 +1114,7 @@ function parseJSON(val, fallback) {
 
 function UploadArea({ label, hint, currentPath, uploadKey, onUpload, onRemove, uploading, wide }) {
   const inputRef = useRef(null);
-  const fullUrl = currentPath ? `${apiBase}${currentPath}` : null;
+  const fullUrl = resolveImageUrl(currentPath) || null;
 
   return (
     <div className="form-group">
@@ -1373,7 +1373,7 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
           <div className="branding-preview-panel">
             <div className="branding-preview-nav" style={{ color: form.accent_color }}>
               {settings.site_logo
-                ? <img src={`${apiBase}${settings.site_logo}`} alt="logo" style={{ height: 30, objectFit: 'contain' }} />
+                ? <img src={resolveImageUrl(settings.site_logo)} alt="logo" style={{ height: 30, objectFit: 'contain' }} />
                 : (form.site_name || 'ESPORTS TRACKER').toUpperCase()
               }
             </div>

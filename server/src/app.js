@@ -30,12 +30,9 @@ async function provisionFirstAdmin() {
   console.log(`✓ First superadmin created: ${FIRST_ADMIN_USER.trim()}`);
 }
 
-// Ensure uploads directories exist
-const uploadsDir = path.join(__dirname, '../uploads/icons');
+// Keep /uploads static serving for any legacy local images (no-op if dir absent)
+const uploadsDir = path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const brandingDir = path.join(__dirname, '../uploads/branding');
-if (!fs.existsSync(brandingDir)) fs.mkdirSync(brandingDir, { recursive: true });
 
 const allowedOrigins = [
   'http://localhost:5173',

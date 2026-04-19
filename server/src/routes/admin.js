@@ -1,42 +1,19 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const requireAuth = require('../middleware/auth');
 const { checkPermission } = require('../middleware/auth');
+const { makeUpload, destroyIfCloudinary } = require('../lib/cloudinary');
 
 const router = express.Router();
 router.use(requireAuth);
 
-// ─── Multer config for icon uploads ──────────────────────────────────────────
-const uploadsDir = path.join(__dirname, '../../uploads/icons');
-
-const iconStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `game-${req.params.id}-${Date.now()}${ext}`);
-  },
-});
-
-const iconUpload = multer({
-  storage: iconStorage,
-  limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Only image files are allowed'));
-    }
-    cb(null, true);
-  },
-});
-
-function deleteIconFile(iconPath) {
-  if (!iconPath) return;
-  const filePath = path.join(uploadsDir, path.basename(iconPath));
-  try { fs.unlinkSync(filePath); } catch (_) {}
-}
+// ─── Multer/Cloudinary config for icon uploads ────────────────────────────────
+const iconUpload = makeUpload(
+  'esports-tracker/games',
+  (req) => `game-${req.params.id}-${Date.now()}`,
+  2
+);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const VALID_PERMISSIONS = ['manage_games', 'manage_tournaments', 'manage_accounts'];
@@ -87,36 +64,33 @@ router.post('/games', checkPermission('manage_games'), (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM games WHERE id = ?').get(result.lastInsertRowid));
 });
 
-router.delete('/games/:id', checkPermission('manage_games'), (req, res) => {
+router.delete('/games/:id', checkPermission('manage_games'), async (req, res) => {
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(req.params.id);
-  if (game?.icon_path) deleteIconFile(game.icon_path);
+  if (game?.icon_path) await destroyIfCloudinary(game.icon_path);
   db.prepare('DELETE FROM games WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
-router.post('/games/:id/icon', checkPermission('manage_games'), iconUpload.single('icon'), (req, res) => {
+router.post('/games/:id/icon', checkPermission('manage_games'), iconUpload.single('icon'), async (req, res) => {
   const { id } = req.params;
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
-  if (!game) {
-    fs.unlinkSync(req.file.path);
-    return res.status(404).json({ error: 'Game not found' });
-  }
+  if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  if (game.icon_path) deleteIconFile(game.icon_path);
+  if (game.icon_path) await destroyIfCloudinary(game.icon_path);
 
-  const iconPath = `/uploads/icons/${req.file.filename}`;
-  db.prepare('UPDATE games SET icon_path = ? WHERE id = ?').run(iconPath, id);
+  // req.file.path is the full Cloudinary URL when using CloudinaryStorage
+  db.prepare('UPDATE games SET icon_path = ? WHERE id = ?').run(req.file.path, id);
   res.json(db.prepare('SELECT * FROM games WHERE id = ?').get(id));
 });
 
-router.delete('/games/:id/icon', checkPermission('manage_games'), (req, res) => {
+router.delete('/games/:id/icon', checkPermission('manage_games'), async (req, res) => {
   const { id } = req.params;
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
   if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  if (game.icon_path) deleteIconFile(game.icon_path);
+  if (game.icon_path) await destroyIfCloudinary(game.icon_path);
   db.prepare('UPDATE games SET icon_path = NULL WHERE id = ?').run(id);
   res.json(db.prepare('SELECT * FROM games WHERE id = ?').get(id));
 });
@@ -433,32 +407,11 @@ router.put('/settings', (req, res) => {
 });
 
 // ─── Branding settings ────────────────────────────────────────────────────────
-const brandingDir = path.join(__dirname, '../../uploads/branding');
-
-const brandingStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, brandingDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${req.params.type}-${Date.now()}${ext}`);
-  },
-});
-
-const brandingUpload = multer({
-  storage: brandingStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Only image files are allowed'));
-    }
-    cb(null, true);
-  },
-});
-
-function deleteBrandingFile(filePath) {
-  if (!filePath) return;
-  const fullPath = path.join(brandingDir, path.basename(filePath));
-  try { fs.unlinkSync(fullPath); } catch (_) {}
-}
+const brandingUpload = makeUpload(
+  'esports-tracker/branding',
+  (req) => `${req.params.type}-${Date.now()}`,
+  5
+);
 
 const BRANDING_TEXT_KEYS = [
   'site_name', 'site_tagline', 'primary_color', 'accent_color',
@@ -480,25 +433,25 @@ router.put('/settings/branding', checkPermission('manage_games'), (req, res) => 
 });
 
 router.post('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), (req, res) => {
-  brandingUpload.single('file')(req, res, (err) => {
+  brandingUpload.single('file')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const settingKey = req.params.type === 'banner' ? 'hero_banner' : `site_${req.params.type}`;
     const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
-    if (existing?.value) deleteBrandingFile(existing.value);
+    if (existing?.value) await destroyIfCloudinary(existing.value);
 
-    const filePath = `/uploads/branding/${req.file.filename}`;
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, filePath);
+    // req.file.path is the full Cloudinary URL
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, req.file.path);
 
-    res.json({ path: filePath });
+    res.json({ path: req.file.path });
   });
 });
 
-router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), (req, res) => {
+router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_games'), async (req, res) => {
   const settingKey = req.params.type === 'banner' ? 'hero_banner' : `site_${req.params.type}`;
   const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
-  if (existing?.value) deleteBrandingFile(existing.value);
+  if (existing?.value) await destroyIfCloudinary(existing.value);
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, '');
   res.json({ success: true });
 });

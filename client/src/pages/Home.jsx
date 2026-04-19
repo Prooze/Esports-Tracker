@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
 import { useBranding } from '../context/BrandingContext';
-import { apiBase } from '../lib/api';
+import { resolveImageUrl } from '../lib/api';
 
 function formatEventDate(dateStr) {
   if (!dateStr) return '';
@@ -36,7 +36,7 @@ export default function Home() {
         {branding.hero_banner && (
           <>
             <img
-              src={`${apiBase}${branding.hero_banner}`}
+              src={resolveImageUrl(branding.hero_banner)}
               alt=""
               className="hero-banner-img"
               aria-hidden="true"
