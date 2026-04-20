@@ -340,8 +340,8 @@ async function performOrganizerSync(slug, token) {
       if (game) {
         gamesMatched++;
         const alreadyExists = db.prepare(
-          'SELECT id FROM upcoming_tournaments WHERE startgg_url = ? AND game_id = ?'
-        ).get(tournamentUrl, game.id);
+          'SELECT id FROM upcoming_tournaments WHERE startgg_url = ?'
+        ).get(tournamentUrl);
         if (!alreadyExists) {
           db.prepare(
             'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
@@ -641,9 +641,9 @@ router.post('/startgg/pending-games/:id/approve', checkPermission('manage_games'
 
   let added = 0;
   for (const p of siblings) {
-    const exists = db.prepare(
-      'SELECT id FROM upcoming_tournaments WHERE startgg_url = ? AND game_id = ?'
-    ).get(p.startgg_tournament_url, gameId);
+    const exists = p.startgg_tournament_url
+      ? db.prepare('SELECT id FROM upcoming_tournaments WHERE startgg_url = ?').get(p.startgg_tournament_url)
+      : db.prepare('SELECT id FROM upcoming_tournaments WHERE name = ? AND event_date = ? AND game_id IS ?').get(p.tournament_name, p.event_date, gameId);
     if (!exists) {
       db.prepare(
         'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
@@ -680,6 +680,16 @@ router.get('/upcoming', (req, res) => {
 router.post('/upcoming', checkPermission('manage_upcoming'), (req, res) => {
   const { name, game_id, event_date, location, startgg_url, description } = req.body;
   if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
+
+  if (startgg_url) {
+    const dup = db.prepare('SELECT id FROM upcoming_tournaments WHERE startgg_url = ?').get(startgg_url);
+    if (dup) return res.status(409).json({ error: 'An upcoming tournament with that start.gg URL already exists' });
+  } else {
+    const dup = db.prepare(
+      'SELECT id FROM upcoming_tournaments WHERE name = ? AND event_date = ? AND game_id IS ?'
+    ).get(name.trim(), event_date, game_id || null);
+    if (dup) return res.status(409).json({ error: 'An upcoming tournament with the same name, date, and game already exists' });
+  }
 
   const result = db.prepare(
     'INSERT INTO upcoming_tournaments (name, game_id, event_date, location, startgg_url, description) VALUES (?, ?, ?, ?, ?, ?)'

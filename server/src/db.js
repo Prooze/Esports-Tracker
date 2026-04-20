@@ -82,6 +82,17 @@ const migrations = [
   `ALTER TABLE upcoming_tournaments ADD COLUMN last_checked_at TEXT`,
   `ALTER TABLE upcoming_tournaments ADD COLUMN linked_tournament_id INTEGER REFERENCES tournaments(id)`,
   `ALTER TABLE tournaments ADD COLUMN auto_imported INTEGER NOT NULL DEFAULT 0`,
+  // Remove duplicate upcoming_tournaments rows, keeping the oldest (MIN id) per startgg_url
+  `DELETE FROM upcoming_tournaments
+   WHERE startgg_url IS NOT NULL
+     AND id NOT IN (
+       SELECT MIN(id) FROM upcoming_tournaments
+       WHERE startgg_url IS NOT NULL
+       GROUP BY startgg_url
+     )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_upcoming_startgg_url
+   ON upcoming_tournaments(startgg_url)
+   WHERE startgg_url IS NOT NULL`,
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (_) {}
