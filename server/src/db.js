@@ -98,6 +98,28 @@ for (const sql of migrations) {
   try { db.exec(sql); } catch (_) {}
 }
 
+// Fix malformed start.gg tournament URLs (tournament/ prefix duplication, missing www, missing /register)
+try {
+  const rows = db.prepare('SELECT id, startgg_url FROM upcoming_tournaments WHERE startgg_url IS NOT NULL').all();
+  const update = db.prepare('UPDATE upcoming_tournaments SET startgg_url = ? WHERE id = ?');
+  for (const row of rows) {
+    const m = row.startgg_url.match(/start\.gg\/tournament\/(?:tournament\/)?([^/?#]+)/);
+    if (m) {
+      const fixed = `https://www.start.gg/tournament/${m[1]}/register`;
+      if (fixed !== row.startgg_url) update.run(fixed, row.id);
+    }
+  }
+  const pgRows = db.prepare('SELECT id, startgg_tournament_url FROM pending_games WHERE startgg_tournament_url IS NOT NULL').all();
+  const pgUpdate = db.prepare('UPDATE pending_games SET startgg_tournament_url = ? WHERE id = ?');
+  for (const row of pgRows) {
+    const m = row.startgg_tournament_url.match(/start\.gg\/tournament\/(?:tournament\/)?([^/?#]+)/);
+    if (m) {
+      const fixed = `https://www.start.gg/tournament/${m[1]}/register`;
+      if (fixed !== row.startgg_tournament_url) pgUpdate.run(fixed, row.id);
+    }
+  }
+} catch (_) {}
+
 // Seed default branding settings (INSERT OR IGNORE so they're never overwritten)
 const brandingDefaults = [
   ['site_name',           'Esports Standings'],

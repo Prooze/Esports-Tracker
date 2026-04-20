@@ -323,7 +323,9 @@ async function performOrganizerSync(slug, token) {
   let pendingCreated = 0;
 
   for (const tournament of tournaments) {
-    const tournamentUrl = `https://start.gg/tournament/${tournament.slug}`;
+    // tournament.slug from the API is "tournament/slug-name" — strip the prefix
+    const pureSlug = tournament.slug.replace(/^tournament\//, '');
+    const tournamentUrl = `https://www.start.gg/tournament/${pureSlug}/register`;
     const eventDate = tournament.startAt
       ? new Date(tournament.startAt * 1000).toISOString().split('T')[0]
       : null;
