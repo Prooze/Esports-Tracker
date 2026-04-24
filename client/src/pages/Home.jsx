@@ -12,6 +12,33 @@ function formatEventDate(dateStr) {
   });
 }
 
+function detectPlatform(url) {
+  if (!url) return null;
+  if (/twitch\.tv\//i.test(url)) return 'twitch';
+  if (/youtube\.com\/|youtu\.be\//i.test(url)) return 'youtube';
+  if (/facebook\.com\/|fb\.watch\//i.test(url)) return 'facebook';
+  return null;
+}
+
+function getEmbedUrl(url, platform) {
+  if (platform === 'twitch') {
+    const m = url.match(/twitch\.tv\/([^/?#]+)/i);
+    const channel = m ? m[1] : '';
+    const domain = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    return `https://player.twitch.tv/?channel=${channel}&parent=${domain}`;
+  }
+  if (platform === 'youtube') {
+    const m1 = url.match(/[?&]v=([^&]+)/);
+    const m2 = url.match(/youtu\.be\/([^/?#]+)/);
+    const videoId = m1 ? m1[1] : m2 ? m2[1] : '';
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+  }
+  if (platform === 'facebook') {
+    return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&autoplay=true`;
+  }
+  return null;
+}
+
 export default function Home() {
   const [games, setGames] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
@@ -30,8 +57,34 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
+  const streamPlatform = detectPlatform(branding.stream_url);
+  const streamEmbedUrl = branding.stream_active && branding.stream_url && streamPlatform
+    ? getEmbedUrl(branding.stream_url, streamPlatform)
+    : null;
+
   return (
     <main className="container">
+      {streamEmbedUrl && (
+        <section className="live-section">
+          <div className="live-badge">
+            <span className="live-dot" />
+            LIVE NOW
+          </div>
+          <div className="live-embed-wrapper">
+            <iframe
+              src={streamEmbedUrl}
+              className="live-embed"
+              allowFullScreen
+              allow={streamPlatform === 'facebook'
+                ? 'autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share'
+                : 'autoplay; fullscreen'}
+              title="Live Stream"
+              frameBorder="0"
+            />
+          </div>
+        </section>
+      )}
+
       <div className={`hero${branding.hero_banner ? ' hero-has-banner' : ''}`}>
         {branding.hero_banner && (
           <>

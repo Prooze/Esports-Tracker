@@ -213,6 +213,9 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const [checkLoading, setCheckLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [checkError, setCheckError] = useState('');
+  const [recordingModal, setRecordingModal] = useState(null);
+  const [recordingUrl, setRecordingUrl] = useState('');
+  const [recordingSaving, setRecordingSaving] = useState(false);
 
   const handleCheckCompletions = async () => {
     setCheckLoading(true);
@@ -297,6 +300,27 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
     if (!res.ok) { setManualError(data.error); return; }
     setManualForm({ name: '', event_name: '', game_id: '', date: '' });
     setShowManual(false);
+    onRefresh();
+  };
+
+  const handleSaveRecording = async (urlOverride) => {
+    if (!recordingModal) return;
+    setRecordingSaving(true);
+    const url = urlOverride !== undefined ? urlOverride : recordingUrl;
+    await fetch(`${apiBase}/api/admin/tournaments/${recordingModal.id}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: recordingModal.name,
+        event_name: recordingModal.event_name,
+        game_id: recordingModal.game_id,
+        date: recordingModal.date,
+        recording_url: url || null,
+      }),
+    });
+    setRecordingSaving(false);
+    setRecordingModal(null);
+    setRecordingUrl('');
     onRefresh();
   };
 
@@ -423,6 +447,39 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
         </form>
       )}
 
+      {recordingModal && (
+        <div className="modal-overlay" onClick={() => setRecordingModal(null)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>{recordingModal.name}</h3>
+            <p style={{ color: 'var(--text-dim)', fontSize: 12, marginBottom: 12 }}>Paste a YouTube or Facebook video URL</p>
+            <div className="form-group">
+              <label>Recording URL</label>
+              <input
+                value={recordingUrl}
+                onChange={(e) => setRecordingUrl(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                autoFocus
+              />
+              <small style={{ color: 'var(--text-dim)', marginTop: 4, display: 'block', lineHeight: 1.7 }}>
+                YouTube: https://www.youtube.com/watch?v=VIDEO_ID<br />
+                Facebook: https://www.facebook.com/username/videos/VIDEO_ID
+              </small>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="btn-primary small" onClick={() => handleSaveRecording()} disabled={recordingSaving}>
+                {recordingSaving ? 'Saving…' : 'Save'}
+              </button>
+              {recordingModal.recording_url && (
+                <button className="btn-danger small" onClick={() => handleSaveRecording('')} disabled={recordingSaving}>
+                  Remove
+                </button>
+              )}
+              <button className="btn-ghost small" onClick={() => setRecordingModal(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="list">
         {tournaments.length === 0 ? (
           <div className="empty-state">No tournaments yet. Import from start.gg or add manually.</div>
@@ -465,7 +522,12 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
             ) : (
               <div key={t.id} className="list-item">
                 <div className="item-info">
-                  <span className="item-name">{t.name}</span>
+                  <span className="item-name">
+                    {t.name}
+                    {t.recording_url && (
+                      <span title="Has recording" style={{ marginLeft: 6, color: 'var(--accent)', fontSize: 14 }}>🎥</span>
+                    )}
+                  </span>
                   {t.event_name && <span className="item-sub">{t.event_name}</span>}
                   <span className="item-meta">
                     {t.icon_emoji} {t.game_name}
@@ -475,6 +537,12 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
                 </div>
                 {canManage && (
                   <div className="item-actions">
+                    <button className="btn-ghost small" onClick={() => {
+                      setRecordingModal(t);
+                      setRecordingUrl(t.recording_url || '');
+                    }}>
+                      {t.recording_url ? 'Recording' : '+ Recording'}
+                    </button>
                     <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
                     <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
                   </div>
@@ -1801,6 +1869,11 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
   const [saveError, setSaveError] = useState('');
   const [uploading, setUploading] = useState(null);
 
+  const [streamForm, setStreamForm] = useState({ stream_url: '', stream_active: false });
+  const [streamSaving, setStreamSaving] = useState(false);
+  const [streamSaved, setStreamSaved] = useState(false);
+  const [streamError, setStreamError] = useState('');
+
   useEffect(() => {
     setForm({
       site_name:          settings.site_name          || 'Esports Standings',
@@ -1813,6 +1886,10 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
         item.type ? item : { type: 'link', label: item.label || '', url: item.url || '' }
       ),
       social_links:       parseJSON(settings.social_links,  []),
+    });
+    setStreamForm({
+      stream_url:    settings.stream_url    || '',
+      stream_active: settings.stream_active === 'true' || settings.stream_active === true,
     });
   }, [settings]);
 
@@ -1867,6 +1944,27 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
     });
     onRefresh();
     reloadBranding();
+  };
+
+  const handleSaveStream = async () => {
+    setStreamSaving(true);
+    setStreamSaved(false);
+    setStreamError('');
+    const res = await fetch(`${apiBase}/api/admin/settings/stream`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify(streamForm),
+    });
+    setStreamSaving(false);
+    if (res.ok) {
+      setStreamSaved(true);
+      onRefresh();
+      reloadBranding();
+      setTimeout(() => setStreamSaved(false), 3000);
+    } else {
+      const data = await res.json();
+      setStreamError(data.error || 'Save failed');
+    }
   };
 
   // Footer content helpers
@@ -2165,6 +2263,49 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* ── Live & Media ── */}
+      <div className="card">
+        <h3 className="card-title">Live &amp; Media</h3>
+        <div className="form-group">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={streamForm.stream_active}
+              onChange={(e) => setStreamForm(f => ({ ...f, stream_active: e.target.checked }))}
+              style={{ width: 'auto', padding: 0 }}
+            />
+            Show live stream on public page
+          </label>
+        </div>
+        <div className="form-group">
+          <label>Stream URL</label>
+          <input
+            value={streamForm.stream_url}
+            onChange={(e) => setStreamForm(f => ({ ...f, stream_url: e.target.value }))}
+            placeholder="https://www.twitch.tv/channelname"
+          />
+          <small style={{ color: 'var(--text-dim)', marginTop: 4, display: 'block', lineHeight: 1.7 }}>
+            Supported formats:<br />
+            Twitch: https://www.twitch.tv/channelname<br />
+            YouTube Live: https://www.youtube.com/watch?v=VIDEO_ID<br />
+            Facebook Live: https://www.facebook.com/username/live
+          </small>
+        </div>
+        {streamForm.stream_active && streamForm.stream_url && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 12 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff3333', display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>Stream active — will appear on the public page</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button type="button" className="btn-secondary" disabled={streamSaving} onClick={handleSaveStream}>
+            {streamSaving ? 'Saving…' : 'Save Stream Settings'}
+          </button>
+          {streamSaved && <span className="success-msg" style={{ padding: '6px 12px' }}>Saved!</span>}
+          {streamError && <span className="error-msg" style={{ padding: '6px 12px' }}>{streamError}</span>}
+        </div>
       </div>
 
       {/* ── Save ── */}

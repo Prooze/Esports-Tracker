@@ -11,6 +11,21 @@ function formatEventDate(dateStr) {
   });
 }
 
+function getRecordingInfo(url) {
+  if (!url) return null;
+  const ytMatch = url.match(/(?:[?&]v=|youtu\.be\/)([^&/?#]+)/);
+  if (ytMatch) {
+    return {
+      platform: 'youtube',
+      thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`,
+    };
+  }
+  if (/facebook\.com\/|fb\.watch\//i.test(url)) {
+    return { platform: 'facebook', thumbnail: null };
+  }
+  return null;
+}
+
 function TournamentRow({ tournament }) {
   const [expanded, setExpanded] = useState(false);
   const [standings, setStandings] = useState(null);
@@ -248,6 +263,43 @@ export default function GameStandings() {
             )}
           </section>
         </>
+      )}
+
+      {tournaments.filter((t) => t.recording_url).length > 0 && (
+        <section className="section">
+          <h2 className="section-title">Past Recordings</h2>
+          <div className="recording-grid">
+            {tournaments.filter((t) => t.recording_url).map((t) => {
+              const info = getRecordingInfo(t.recording_url);
+              return (
+                <a
+                  key={t.id}
+                  href={t.recording_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="recording-card"
+                >
+                  <div className="recording-thumb">
+                    {info?.thumbnail
+                      ? <img src={info.thumbnail} alt={t.name} />
+                      : <div className="recording-thumb-placeholder">▶</div>
+                    }
+                  </div>
+                  <div className="recording-info">
+                    <div className="recording-name">{t.name}</div>
+                    {t.date && (
+                      <div className="recording-date">
+                        {new Date(t.date + 'T12:00:00').toLocaleDateString(undefined, {
+                          year: 'numeric', month: 'short', day: 'numeric',
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {upcoming.length > 0 && (

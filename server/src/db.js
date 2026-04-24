@@ -82,6 +82,8 @@ const migrations = [
   `ALTER TABLE upcoming_tournaments ADD COLUMN last_checked_at TEXT`,
   `ALTER TABLE upcoming_tournaments ADD COLUMN linked_tournament_id INTEGER REFERENCES tournaments(id)`,
   `ALTER TABLE tournaments ADD COLUMN auto_imported INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE tournaments ADD COLUMN recording_url TEXT`,
+  `ALTER TABLE upcoming_tournaments ADD COLUMN recording_url TEXT`,
   // Remove duplicate upcoming_tournaments rows, keeping the oldest (MIN id) per startgg_url
   `DELETE FROM upcoming_tournaments
    WHERE startgg_url IS NOT NULL

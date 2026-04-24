@@ -931,6 +931,132 @@ input[type="color"] {
 }
 .upcoming-register:hover { opacity: 0.85; }
 
+/* ─── Live Stream ─────────────────────────────────────────────────────────────── */
+.live-section {
+  margin: 24px 0 0;
+}
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 30, 30, 0.15);
+  border: 1px solid rgba(255, 30, 30, 0.4);
+  color: #ff4444;
+  font-family: var(--font-head);
+  font-size: 18px;
+  letter-spacing: 3px;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff3333;
+  flex-shrink: 0;
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.8); }
+}
+.live-embed-wrapper {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 */
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+.live-embed {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* ─── Past Recordings ─────────────────────────────────────────────────────────── */
+.recording-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+.recording-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color 0.2s, transform 0.15s;
+}
+.recording-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.recording-thumb {
+  aspect-ratio: 16 / 9;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+.recording-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.recording-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+}
+.recording-info {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recording-name {
+  font-family: var(--font-head);
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+.recording-date {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ─── Admin Modal ─────────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
   .hero-title   { font-size: 52px; }
@@ -943,4 +1069,5 @@ input[type="color"] {
   .tournament-players { display: none; }
   .standings-table th,
   .standings-table td { padding: 8px 10px; }
+  .recording-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 }

@@ -241,12 +241,12 @@ router.post('/tournaments', checkPermission('manage_tournaments'), (req, res) =>
 });
 
 router.put('/tournaments/:id', checkPermission('manage_tournaments'), (req, res) => {
-  const { name, event_name, game_id, date } = req.body;
+  const { name, event_name, game_id, date, recording_url } = req.body;
   const { id } = req.params;
 
   db.prepare(
-    'UPDATE tournaments SET name = ?, event_name = ?, game_id = ?, date = ? WHERE id = ?'
-  ).run(name, event_name || null, game_id, date || null, id);
+    'UPDATE tournaments SET name = ?, event_name = ?, game_id = ?, date = ?, recording_url = ? WHERE id = ?'
+  ).run(name, event_name || null, game_id, date || null, recording_url || null, id);
 
   res.json(db.prepare('SELECT * FROM tournaments WHERE id = ?').get(id));
 });
@@ -864,6 +864,14 @@ router.delete('/settings/:type(logo|favicon|banner)', checkPermission('manage_br
   const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
   if (existing?.value) await destroyIfCloudinary(existing.value);
   db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(settingKey, '');
+  res.json({ success: true });
+});
+
+router.put('/settings/stream', checkPermission('manage_branding'), (req, res) => {
+  const { stream_url, stream_active } = req.body;
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  upsert.run('stream_url', stream_url || '');
+  upsert.run('stream_active', String(!!stream_active));
   res.json({ success: true });
 });
 

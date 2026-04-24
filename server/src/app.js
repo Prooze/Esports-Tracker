@@ -68,6 +68,7 @@ app.get('/api/settings/public', (req, res) => {
   // SQLite stores values as text; accept 'true', '1', or boolean true
   const activeRaw = raw.announcement_active;
   const announcementActive = activeRaw === 'true' || activeRaw === '1' || activeRaw === true;
+  const streamActive = raw.stream_active === 'true' || raw.stream_active === '1';
 
   console.log('[settings/public] announcement_active raw:', JSON.stringify(activeRaw), '→', announcementActive);
   console.log('[settings/public] announcement_text:', JSON.stringify(raw.announcement_text));
@@ -84,6 +85,8 @@ app.get('/api/settings/public', (req, res) => {
     announcement_active: announcementActive,
     footer_links,
     social_links,
+    stream_url:          raw.stream_url           || null,
+    stream_active:       streamActive,
   });
 });
 

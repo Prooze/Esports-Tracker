@@ -15,6 +15,8 @@ const DEFAULTS = {
   social_links:        [],
   announcement_text:   '',
   announcement_active: false,
+  stream_url:          null,
+  stream_active:       false,
 };
 
 function hexToRgba(hex, alpha) {
