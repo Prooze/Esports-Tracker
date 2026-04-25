@@ -242,12 +242,12 @@ export default function GameStandings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {standings.map((s, i) => (
+                  {standings.map((s) => (
                     <tr
                       key={s.player_name}
-                      className={i === 0 ? 'top-1' : i === 1 ? 'top-2' : i === 2 ? 'top-3' : ''}
+                      className={s.rank === 1 ? 'top-1' : s.rank === 2 ? 'top-2' : s.rank === 3 ? 'top-3' : ''}
                     >
-                      <td className="rank">{i + 1}</td>
+                      <td className="rank">{s.rank}</td>
                       <td className="player-name">{s.player_name}</td>
                       <td className="points">{s.total_points}</td>
                       <td>{s.wins}</td>
