@@ -216,6 +216,9 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const [recordingModal, setRecordingModal] = useState(null);
   const [recordingUrl, setRecordingUrl] = useState('');
   const [recordingSaving, setRecordingSaving] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const [logEntries, setLogEntries] = useState([]);
+  const [logLoading, setLogLoading] = useState(false);
 
   const handleCheckCompletions = async () => {
     setCheckLoading(true);
@@ -229,12 +232,28 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setCheckResult(data);
-      if (data.completed > 0) onRefresh();
+      onRefresh();
+      // Refresh log automatically after a check
+      fetchLog();
     } catch (err) {
       setCheckError(err.message);
     } finally {
       setCheckLoading(false);
     }
+  };
+
+  const fetchLog = async () => {
+    setLogLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/api/admin/tournaments/completion-log`, { headers: authHeaders });
+      if (res.ok) setLogEntries(await res.json());
+    } catch (_) {}
+    finally { setLogLoading(false); }
+  };
+
+  const handleToggleLog = async () => {
+    if (!showLog) await fetchLog();
+    setShowLog((v) => !v);
   };
 
   // Years present in the game-filtered subset so the year dropdown stays relevant
@@ -351,6 +370,9 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
             >
               {checkLoading ? 'Checking…' : 'Check Completions'}
             </button>
+            <button className="btn-ghost small" onClick={handleToggleLog} title="View completion check log">
+              {showLog ? 'Hide Log' : 'View Log'}
+            </button>
             <button className="btn-ghost small" onClick={() => setShowManual((v) => !v)}>
               {showManual ? '− Cancel' : '+ Add Manually'}
             </button>
@@ -366,6 +388,29 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
         </div>
       )}
       {checkError && <div className="error-msg" style={{ marginBottom: 8 }}>{checkError}</div>}
+
+      {showLog && (
+        <div className="card" style={{ marginBottom: 12, padding: '12px 16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Completion Check Log</span>
+            <button className="btn-ghost small" onClick={fetchLog} disabled={logLoading}>
+              {logLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {logEntries.length === 0 ? (
+            <div className="dim" style={{ fontSize: 12 }}>No log entries yet. Run a completion check to populate.</div>
+          ) : (
+            <div style={{ fontFamily: 'var(--font-body)', fontSize: 11, lineHeight: 1.7, maxHeight: 300, overflowY: 'auto' }}>
+              {logEntries.map((e, i) => (
+                <div key={i} style={{ color: e.level === 'error' ? 'var(--danger)' : e.level === 'warn' ? '#f59e0b' : 'var(--text-dim)', borderBottom: '1px solid var(--border-dim)', padding: '2px 0' }}>
+                  <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>{new Date(e.ts).toLocaleTimeString()}</span>
+                  {e.msg}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {tournaments.length > 0 && (
         <div className="form-row" style={{ flexWrap: 'wrap', marginBottom: 4 }}>

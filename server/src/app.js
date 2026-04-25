@@ -168,7 +168,7 @@ provisionFirstAdmin().then(() => {
     console.log(`✓ Server running at http://localhost:${PORT}`);
     // Run completion check on startup (fire-and-forget)
     checkAndCompleteUpcomingTournaments()
-      .then((r) => { if (r.completed > 0) console.log('[startup] Completion check:', r); })
+      .then((r) => console.log(`[startup] Completion check done — checked ${r.checked}, imported ${r.completed}`))
       .catch((err) => console.error('[startup] Completion check error:', err.message));
   });
 }).catch(err => {
