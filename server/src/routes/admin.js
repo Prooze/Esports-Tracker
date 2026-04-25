@@ -707,6 +707,7 @@ router.post('/startgg/lookup', checkPermission('manage_tournaments'), async (req
             id
             name
             numEntrants
+            videogame { id name }
           }
         }
       }`,

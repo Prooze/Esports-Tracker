@@ -35,7 +35,7 @@ router.get('/:id/standings', (req, res) => {
   const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
   if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  const standings = db.prepare(`
+  const rows = db.prepare(`
     SELECT
       s.player_name,
       SUM(s.points)                                        AS total_points,
@@ -48,6 +48,15 @@ router.get('/:id/standings', (req, res) => {
     GROUP BY s.player_name
     ORDER BY total_points DESC, wins DESC, top3 DESC
   `).all(id, year);
+
+  // Standard competition ranking (1, 1, 3, 4, 4, 6…)
+  // Players with equal total_points share the same rank; the next rank skips
+  // a number of positions equal to the size of the tied group.
+  let rank = 1;
+  const standings = rows.map((row, i) => {
+    if (i > 0 && row.total_points !== rows[i - 1].total_points) rank = i + 1;
+    return { ...row, rank };
+  });
 
   res.json({ game, year, standings });
 });

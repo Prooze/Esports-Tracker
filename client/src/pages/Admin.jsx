@@ -36,6 +36,21 @@ class AdminErrorBoundary extends Component {
 }
 
 // ─── start.gg import form ─────────────────────────────────────────────────────
+function matchGame(games, videogameName) {
+  if (!videogameName) return null;
+  const needle = videogameName.toLowerCase();
+  // Exact match
+  const exact = games.find((g) => g.name.toLowerCase() === needle);
+  if (exact) return exact;
+  // Partial: every word in the shorter string appears in the longer one
+  const needleWords = needle.split(/\W+/).filter(Boolean);
+  const partial = games.find((g) => {
+    const hay = g.name.toLowerCase();
+    return needleWords.every((w) => hay.includes(w));
+  });
+  return partial || null;
+}
+
 function StartggImportForm({ games, onImported, authHeaders }) {
   const [url, setUrl] = useState('');
   const [fetchLoading, setFetchLoading] = useState(false);
@@ -46,12 +61,17 @@ function StartggImportForm({ games, onImported, authHeaders }) {
   const [importLoading, setImportLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [autoNotice, setAutoNotice] = useState('');
+  const [gameWarning, setGameWarning] = useState('');
 
   const handleFetch = async () => {
     setError('');
     setSuccess('');
+    setAutoNotice('');
+    setGameWarning('');
     setTournament(null);
     setSelectedEvent('');
+    setSelectedGame('');
     setFetchLoading(true);
 
     try {
@@ -65,6 +85,24 @@ function StartggImportForm({ games, onImported, authHeaders }) {
       setTournament(data);
       if (data.startAt) {
         setDate(new Date(data.startAt * 1000).toISOString().split('T')[0]);
+      }
+
+      // Auto-select when there is exactly one event
+      if (data.events?.length === 1) {
+        const ev = data.events[0];
+        setSelectedEvent(String(ev.id));
+
+        const vgName = ev.videogame?.name;
+        const matched = matchGame(games, vgName);
+        if (matched) {
+          setSelectedGame(String(matched.id));
+          setAutoNotice(`Auto-selected: ${ev.name} → ${matched.name}`);
+        } else {
+          setAutoNotice(`Auto-selected event: ${ev.name}`);
+          if (vgName) {
+            setGameWarning(`Game "${vgName}" not found in tracker — please select manually or add the game first.`);
+          }
+        }
       }
     } catch (err) {
       setError(err.message);
@@ -145,12 +183,19 @@ function StartggImportForm({ games, onImported, authHeaders }) {
             <span className="dim"> · {tournament.events.length} event(s)</span>
           </div>
 
+          {autoNotice && (
+            <div className="auto-select-notice">✓ {autoNotice}</div>
+          )}
+          {gameWarning && (
+            <div className="error-msg" style={{ marginBottom: 8 }}>{gameWarning}</div>
+          )}
+
           <div className="form-row" style={{ flexWrap: 'wrap' }}>
             <div className="form-group" style={{ flex: '2 1 220px' }}>
               <label>Event</label>
               <select
                 value={selectedEvent}
-                onChange={(e) => setSelectedEvent(e.target.value)}
+                onChange={(e) => { setSelectedEvent(e.target.value); setAutoNotice(''); setGameWarning(''); }}
               >
                 <option value="">Select event…</option>
                 {tournament.events.map((ev) => (
