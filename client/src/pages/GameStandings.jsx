@@ -21,6 +21,15 @@ function isRegistrationClosed(t) {
   return false;
 }
 
+function applyRanks(rows) {
+  if (!Array.isArray(rows)) return [];
+  let rank = 1;
+  return rows.map((row, i) => {
+    if (i > 0 && row.total_points !== rows[i - 1].total_points) rank = i + 1;
+    return { ...row, rank };
+  });
+}
+
 function getRecordingInfo(url) {
   if (!url) return null;
   const ytMatch = url.match(/(?:[?&]v=|youtu\.be\/)([^&/?#]+)/);
@@ -168,7 +177,7 @@ export default function GameStandings() {
       ]);
       if (cancelled) return;
 
-      setStandings(sData.standings);
+      setStandings(applyRanks(sData.standings));
       setTournaments(tData);
       setLoading(false);
     }
@@ -186,7 +195,7 @@ export default function GameStandings() {
       fetch(`${apiBase}/api/games/${id}/standings?year=${yr}`).then((r) => r.json()),
       fetch(`${apiBase}/api/games/${id}/tournaments?year=${yr}`).then((r) => r.json()),
     ]);
-    setStandings(sData.standings);
+    setStandings(applyRanks(sData.standings));
     setTournaments(tData);
     setLoading(false);
   };
