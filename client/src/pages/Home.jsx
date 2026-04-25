@@ -12,6 +12,16 @@ function formatEventDate(dateStr) {
   });
 }
 
+function isRegistrationClosed(t) {
+  const now = new Date();
+  if (t.event_date) {
+    const [y, m, d] = t.event_date.split('-');
+    if (new Date(+y, +m - 1, +d) < now) return true;
+  }
+  if (t.registration_closes_at && new Date(t.registration_closes_at) < now) return true;
+  return false;
+}
+
 function detectPlatform(url) {
   if (!url) return null;
   if (/twitch\.tv\//i.test(url)) return 'twitch';
@@ -141,14 +151,13 @@ export default function Home() {
                 {t.location && <div className="upcoming-venue">{t.location}</div>}
                 {t.description && <div className="upcoming-desc">{t.description}</div>}
                 {t.startgg_url && (
-                  <a
-                    href={t.startgg_url}
-                    className="upcoming-register"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Register on start.gg
-                  </a>
+                  isRegistrationClosed(t)
+                    ? <span className="registration-closed">Registration Closed</span>
+                    : (
+                      <a href={t.startgg_url} className="upcoming-register" target="_blank" rel="noopener noreferrer">
+                        Register on start.gg
+                      </a>
+                    )
                 )}
               </div>
             ))}

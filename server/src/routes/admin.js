@@ -299,6 +299,7 @@ async function performOrganizerSync(slug, token) {
             name
             slug
             startAt
+            registrationClosesAt
             events {
               id
               name
@@ -329,6 +330,9 @@ async function performOrganizerSync(slug, token) {
     const eventDate = tournament.startAt
       ? new Date(tournament.startAt * 1000).toISOString().split('T')[0]
       : null;
+    const registrationClosesAt = tournament.registrationClosesAt
+      ? new Date(tournament.registrationClosesAt * 1000).toISOString()
+      : null;
 
     const seenGames = new Set();
 
@@ -346,9 +350,16 @@ async function performOrganizerSync(slug, token) {
         ).get(tournamentUrl);
         if (!alreadyExists) {
           db.prepare(
-            'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
-          ).run(tournament.name, game.id, eventDate, tournamentUrl);
+            'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url, registration_closes_at) VALUES (?, ?, ?, ?, ?)'
+          ).run(tournament.name, game.id, eventDate, tournamentUrl, registrationClosesAt);
           upcomingAdded++;
+        } else {
+          // Update registration close time if it changed
+          if (registrationClosesAt) {
+            db.prepare(
+              'UPDATE upcoming_tournaments SET registration_closes_at = ? WHERE startgg_url = ? AND registration_closes_at IS NULL'
+            ).run(registrationClosesAt, tournamentUrl);
+          }
         }
       } else {
         const alreadyPending = db.prepare(
@@ -373,9 +384,115 @@ async function performOrganizerSync(slug, token) {
 }
 
 // ─── Completion detection ─────────────────────────────────────────────────────
+
+// Returns true for numeric 3, string "3", or string "COMPLETED"
+function isTournamentCompleted(state) {
+  return state === 3 || state === 'COMPLETED' || String(state) === '3';
+}
+
+const TOURNAMENT_STATUS_QUERY = `query TournamentStatus($slug: String!) {
+  tournament(slug: $slug) {
+    id
+    name
+    state
+    events {
+      id
+      name
+      state
+      videogame { name }
+      standings(query: { page: 1, perPage: 64 }) {
+        nodes {
+          placement
+          entrant {
+            participants {
+              gamerTag
+              prefix
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+// Import standings for a single upcoming tournament from already-fetched API data.
+// Returns { imported: bool, tournamentId, count }.
+function doImportStandings(upcoming, tournamentData) {
+  const tournament = tournamentData;
+
+  let matchedEvent = null;
+  if (upcoming.game_name) {
+    matchedEvent = (tournament.events || []).find(
+      (e) => e.videogame?.name?.toLowerCase() === upcoming.game_name.toLowerCase()
+    );
+  }
+  if (!matchedEvent && tournament.events?.length > 0) {
+    matchedEvent = tournament.events.find((e) => isTournamentCompleted(e.state))
+      || tournament.events[0];
+  }
+
+  console.log(`[completion-check] #${upcoming.id} "${upcoming.name}": matched event = ${matchedEvent ? `"${matchedEvent.name}" (state=${matchedEvent.state})` : 'none'}`);
+
+  if (!matchedEvent) {
+    db.prepare("UPDATE upcoming_tournaments SET status = 'completed' WHERE id = ?").run(upcoming.id);
+    return { imported: false, tournamentId: null, count: 0 };
+  }
+
+  const nodes = matchedEvent.standings?.nodes ?? [];
+  console.log(`[completion-check] #${upcoming.id}: standings nodes found = ${nodes.length}`);
+
+  const alreadyImported = db.prepare(
+    'SELECT id FROM tournaments WHERE startgg_id = ?'
+  ).get(String(matchedEvent.id));
+
+  let tournamentId = alreadyImported?.id ?? null;
+
+  if (alreadyImported) {
+    console.log(`[completion-check] #${upcoming.id}: already imported as tournament #${tournamentId}`);
+    db.prepare('UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?')
+      .run('completed', tournamentId, upcoming.id);
+    return { imported: false, tournamentId, count: 0 };
+  }
+
+  if (nodes.length === 0) {
+    console.log(`[completion-check] #${upcoming.id}: no standings nodes yet — skipping import`);
+    db.prepare('UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?')
+      .run('completed', null, upcoming.id);
+    return { imported: false, tournamentId: null, count: 0 };
+  }
+
+  const tResult = db.prepare(
+    'INSERT INTO tournaments (startgg_id, name, event_name, game_id, date, auto_imported) VALUES (?, ?, ?, ?, ?, 1)'
+  ).run(String(matchedEvent.id), tournament.name, matchedEvent.name || null, upcoming.game_id, upcoming.event_date);
+
+  tournamentId = tResult.lastInsertRowid;
+  const insertStanding = db.prepare(
+    'INSERT INTO standings (tournament_id, player_name, placement, points) VALUES (?, ?, ?, ?)'
+  );
+
+  db.transaction(() => {
+    for (const node of nodes) {
+      const participants = node.entrant?.participants ?? [];
+      const playerName = participants.map((p) =>
+        p.prefix ? `${p.prefix} | ${p.gamerTag}` : p.gamerTag
+      ).join(' / ') || 'Unknown';
+      insertStanding.run(tournamentId, playerName, node.placement, getPoints(node.placement));
+    }
+  })();
+
+  db.prepare('UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?')
+    .run('completed', tournamentId, upcoming.id);
+
+  console.log(`[completion-check] Imported "${tournament.name}" — ${matchedEvent.name} (${nodes.length} players, game_id=${upcoming.game_id})`);
+  return { imported: true, tournamentId, count: nodes.length };
+}
+
 async function checkAndCompleteUpcomingTournaments() {
   const token = db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get()?.value;
-  if (!token) return { checked: 0, completed: 0 };
+  if (!token) {
+    console.log('[completion-check] No start.gg token configured — skipping');
+    return { checked: 0, completed: 0 };
+  }
 
   const today = new Date().toISOString().split('T')[0];
   const candidates = db.prepare(`
@@ -388,109 +505,51 @@ async function checkAndCompleteUpcomingTournaments() {
       AND u.status = 'upcoming'
   `).all(today);
 
+  console.log(`[completion-check] Checking ${candidates.length} candidate(s) with event_date < ${today}`);
+
   let completed = 0;
   const now = new Date().toISOString();
   const updateChecked = db.prepare('UPDATE upcoming_tournaments SET last_checked_at = ? WHERE id = ?');
 
   for (const upcoming of candidates) {
     const slug = extractSlug(upcoming.startgg_url);
-    if (!slug) { updateChecked.run(now, upcoming.id); continue; }
+    if (!slug) {
+      console.log(`[completion-check] #${upcoming.id} "${upcoming.name}": could not extract slug from "${upcoming.startgg_url}"`);
+      updateChecked.run(now, upcoming.id);
+      continue;
+    }
+
+    console.log(`[completion-check] Querying start.gg for slug="${slug}" (upcoming #${upcoming.id} "${upcoming.name}")`);
 
     try {
-      const data = await startggQuery(
-        `query TournamentStatus($slug: String!) {
-          tournament(slug: $slug) {
-            id
-            name
-            state
-            events {
-              id
-              name
-              state
-              videogame { name }
-              standings(query: { page: 1, perPage: 64 }) {
-                nodes {
-                  placement
-                  entrant {
-                    participants {
-                      gamerTag
-                      prefix
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }`,
-        { slug },
-        token
-      );
-
+      const data = await startggQuery(TOURNAMENT_STATUS_QUERY, { slug }, token);
       updateChecked.run(now, upcoming.id);
 
       const tournament = data.tournament;
-      if (!tournament || tournament.state !== 3) continue;
-
-      // Find the event matching this game
-      let matchedEvent = null;
-      if (upcoming.game_name) {
-        matchedEvent = (tournament.events || []).find(
-          (e) => e.videogame?.name?.toLowerCase() === upcoming.game_name.toLowerCase()
-        );
-      }
-      if (!matchedEvent && tournament.events?.length > 0) {
-        matchedEvent = tournament.events.find((e) => e.state === 3) || tournament.events[0];
-      }
-
-      if (!matchedEvent) {
-        db.prepare("UPDATE upcoming_tournaments SET status = 'completed' WHERE id = ?").run(upcoming.id);
+      if (!tournament) {
+        console.log(`[completion-check] #${upcoming.id}: tournament not found on start.gg`);
         continue;
       }
 
-      const nodes = matchedEvent.standings?.nodes ?? [];
-      const alreadyImported = db.prepare(
-        'SELECT id FROM tournaments WHERE startgg_id = ?'
-      ).get(String(matchedEvent.id));
+      console.log(`[completion-check] #${upcoming.id} "${upcoming.name}": start.gg state=${JSON.stringify(tournament.state)}, events=${tournament.events?.length ?? 0}`);
 
-      let tournamentId = alreadyImported?.id ?? null;
-
-      if (!alreadyImported && nodes.length > 0) {
-        const tResult = db.prepare(
-          'INSERT INTO tournaments (startgg_id, name, event_name, game_id, date, auto_imported) VALUES (?, ?, ?, ?, ?, 1)'
-        ).run(String(matchedEvent.id), tournament.name, matchedEvent.name || null, upcoming.game_id, upcoming.event_date);
-
-        tournamentId = tResult.lastInsertRowid;
-        const insertStanding = db.prepare(
-          'INSERT INTO standings (tournament_id, player_name, placement, points) VALUES (?, ?, ?, ?)'
-        );
-
-        db.transaction(() => {
-          for (const node of nodes) {
-            const participants = node.entrant?.participants ?? [];
-            const playerName = participants.map((p) =>
-              p.prefix ? `${p.prefix} | ${p.gamerTag}` : p.gamerTag
-            ).join(' / ') || 'Unknown';
-            insertStanding.run(tournamentId, playerName, node.placement, getPoints(node.placement));
-          }
-        })();
-
-        completed++;
-        console.log(`[completion-check] Auto-imported "${tournament.name}" — ${matchedEvent.name} (${nodes.length} players)`);
+      if (!isTournamentCompleted(tournament.state)) {
+        console.log(`[completion-check] #${upcoming.id}: not completed (state=${tournament.state}) — skipping`);
+        continue;
       }
 
-      db.prepare(
-        'UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?'
-      ).run('completed', tournamentId, upcoming.id);
+      const result = doImportStandings(upcoming, tournament);
+      if (result.imported) {
+        completed++;
+        const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+        upsert.run('auto_import_last_at', now);
+      }
     } catch (err) {
-      console.error(`[completion-check] Error for upcoming #${upcoming.id}:`, err.message);
+      console.error(`[completion-check] Error for upcoming #${upcoming.id} "${upcoming.name}":`, err.message);
     }
   }
 
-  if (completed > 0) {
-    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-    upsert.run('auto_import_last_at', now);
-  }
-
+  console.log(`[completion-check] Done — checked ${candidates.length}, imported ${completed}`);
   return { checked: candidates.length, completed };
 }
 
@@ -499,6 +558,93 @@ router.post('/tournaments/check-completions', checkPermission('manage_tournament
     const result = await checkAndCompleteUpcomingTournaments();
     res.json(result);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Force-import standings for a specific upcoming tournament
+router.post('/upcoming/:id/import-standings', checkPermission('manage_tournaments'), async (req, res) => {
+  const upcoming = db.prepare(`
+    SELECT u.*, g.name AS game_name
+    FROM upcoming_tournaments u
+    LEFT JOIN games g ON u.game_id = g.id
+    WHERE u.id = ?
+  `).get(req.params.id);
+
+  if (!upcoming) return res.status(404).json({ error: 'Upcoming tournament not found' });
+  if (!upcoming.startgg_url) return res.status(400).json({ error: 'No start.gg URL set for this tournament' });
+
+  const token = db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get()?.value;
+  if (!token) return res.status(400).json({ error: 'No start.gg API token configured' });
+
+  const slug = extractSlug(upcoming.startgg_url);
+  if (!slug) return res.status(400).json({ error: 'Could not parse tournament slug from the start.gg URL' });
+
+  try {
+    const data = await startggQuery(TOURNAMENT_STATUS_QUERY, { slug }, token);
+    const tournament = data.tournament;
+    if (!tournament) return res.status(404).json({ error: 'Tournament not found on start.gg' });
+
+    console.log(`[force-import] #${upcoming.id} "${upcoming.name}": state=${JSON.stringify(tournament.state)}, events=${tournament.events?.length ?? 0}`);
+
+    // Find the matching event — for force-import we don't gate on completed state
+    let matchedEvent = null;
+    if (upcoming.game_name) {
+      matchedEvent = (tournament.events || []).find(
+        (e) => e.videogame?.name?.toLowerCase() === upcoming.game_name.toLowerCase()
+      );
+    }
+    if (!matchedEvent && tournament.events?.length > 0) {
+      matchedEvent = tournament.events.find((e) => isTournamentCompleted(e.state))
+        || tournament.events[0];
+    }
+
+    if (!matchedEvent) {
+      return res.status(400).json({ error: 'No matching event found on start.gg' });
+    }
+
+    const nodes = matchedEvent.standings?.nodes ?? [];
+    console.log(`[force-import] #${upcoming.id}: event="${matchedEvent.name}" state=${matchedEvent.state} standings=${nodes.length}`);
+
+    if (nodes.length === 0) {
+      return res.status(400).json({
+        error: `No standings available yet for "${matchedEvent.name}" (state: ${matchedEvent.state}). The event may still be in progress.`,
+      });
+    }
+
+    const alreadyImported = db.prepare('SELECT id FROM tournaments WHERE startgg_id = ?').get(String(matchedEvent.id));
+    if (alreadyImported) {
+      db.prepare('UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?')
+        .run('completed', alreadyImported.id, upcoming.id);
+      return res.json({ success: true, already_imported: true, tournament_id: alreadyImported.id, count: 0 });
+    }
+
+    const tResult = db.prepare(
+      'INSERT INTO tournaments (startgg_id, name, event_name, game_id, date, auto_imported) VALUES (?, ?, ?, ?, ?, 1)'
+    ).run(String(matchedEvent.id), tournament.name, matchedEvent.name || null, upcoming.game_id, upcoming.event_date);
+
+    const tournamentId = tResult.lastInsertRowid;
+    const insertStanding = db.prepare(
+      'INSERT INTO standings (tournament_id, player_name, placement, points) VALUES (?, ?, ?, ?)'
+    );
+
+    db.transaction(() => {
+      for (const node of nodes) {
+        const participants = node.entrant?.participants ?? [];
+        const playerName = participants.map((p) =>
+          p.prefix ? `${p.prefix} | ${p.gamerTag}` : p.gamerTag
+        ).join(' / ') || 'Unknown';
+        insertStanding.run(tournamentId, playerName, node.placement, getPoints(node.placement));
+      }
+    })();
+
+    db.prepare('UPDATE upcoming_tournaments SET status = ?, linked_tournament_id = ? WHERE id = ?')
+      .run('completed', tournamentId, upcoming.id);
+
+    console.log(`[force-import] Imported "${tournament.name}" — ${matchedEvent.name} (${nodes.length} players)`);
+    res.json({ success: true, tournament_id: tournamentId, count: nodes.length });
+  } catch (err) {
+    console.error(`[force-import] Error for #${upcoming.id}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -680,7 +826,7 @@ router.get('/upcoming', (req, res) => {
 });
 
 router.post('/upcoming', checkPermission('manage_upcoming'), (req, res) => {
-  const { name, game_id, event_date, location, startgg_url, description } = req.body;
+  const { name, game_id, event_date, location, startgg_url, description, registration_closes_at } = req.body;
   if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
 
   if (startgg_url) {
@@ -694,20 +840,20 @@ router.post('/upcoming', checkPermission('manage_upcoming'), (req, res) => {
   }
 
   const result = db.prepare(
-    'INSERT INTO upcoming_tournaments (name, game_id, event_date, location, startgg_url, description) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null);
+    'INSERT INTO upcoming_tournaments (name, game_id, event_date, location, startgg_url, description, registration_closes_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null, registration_closes_at || null);
 
   res.status(201).json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(result.lastInsertRowid));
 });
 
 router.put('/upcoming/:id', checkPermission('manage_upcoming'), (req, res) => {
   const { id } = req.params;
-  const { name, game_id, event_date, location, startgg_url, description } = req.body;
+  const { name, game_id, event_date, location, startgg_url, description, registration_closes_at } = req.body;
   if (!name || !event_date) return res.status(400).json({ error: 'name and event_date are required' });
 
   db.prepare(
-    'UPDATE upcoming_tournaments SET name = ?, game_id = ?, event_date = ?, location = ?, startgg_url = ?, description = ? WHERE id = ?'
-  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null, id);
+    'UPDATE upcoming_tournaments SET name = ?, game_id = ?, event_date = ?, location = ?, startgg_url = ?, description = ?, registration_closes_at = ? WHERE id = ?'
+  ).run(name.trim(), game_id || null, event_date, location || null, startgg_url || null, description || null, registration_closes_at || null, id);
 
   res.json(db.prepare('SELECT * FROM upcoming_tournaments WHERE id = ?').get(id));
 });

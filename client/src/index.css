@@ -930,6 +930,15 @@ input[type="color"] {
   align-self: flex-start;
 }
 .upcoming-register:hover { opacity: 0.85; }
+.registration-closed {
+  margin-top: 6px;
+  display: inline-block;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 7px 0;
+}
 
 /* ─── Live Stream ─────────────────────────────────────────────────────────────── */
 .live-section {

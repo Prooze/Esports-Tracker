@@ -1572,14 +1572,17 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
 function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('manage_upcoming');
+  const canImport = hasPermission('manage_tournaments');
 
-  const BLANK = { name: '', game_id: '', event_date: '', location: '', startgg_url: '', description: '' };
+  const BLANK = { name: '', game_id: '', event_date: '', location: '', startgg_url: '', description: '', registration_closes_at: '' };
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(BLANK);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [importingId, setImportingId] = useState(null);
+  const [importResults, setImportResults] = useState({});
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -1598,9 +1601,30 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
       location: t.location || '',
       startgg_url: t.startgg_url || '',
       description: t.description || '',
+      registration_closes_at: t.registration_closes_at
+        ? t.registration_closes_at.slice(0, 16) // trim to YYYY-MM-DDTHH:MM for input
+        : '',
     });
     setShowForm(true);
     setError('');
+  };
+
+  const handleForceImport = async (id) => {
+    setImportingId(id);
+    setImportResults((r) => ({ ...r, [id]: null }));
+    try {
+      const res = await fetch(`${apiBase}/api/admin/upcoming/${id}/import-standings`, {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      setImportResults((r) => ({ ...r, [id]: res.ok ? { ok: true, ...data } : { ok: false, error: data.error } }));
+      if (res.ok) onRefresh();
+    } catch (err) {
+      setImportResults((r) => ({ ...r, [id]: { ok: false, error: err.message } }));
+    } finally {
+      setImportingId(null);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -1641,56 +1665,81 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
     return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
-  const renderItem = (t, { showOverdueBadge = false } = {}) => (
-    <div key={t.id} className="list-item">
-      <div className="item-info">
-        <span className="item-name">
-          {t.name}
-          {showOverdueBadge && (
-            <span
-              className="tab-badge"
-              style={{ marginLeft: 8, background: '#f59e0b', color: '#000', fontSize: 11 }}
-            >
-              Past date
-            </span>
-          )}
-          {t.status === 'completed' && t.linked_tournament_id && (
-            <span
-              className="tab-badge"
-              style={{ marginLeft: 8, background: '#22c55e', color: '#000', fontSize: 11 }}
-            >
-              Auto-imported
-            </span>
-          )}
-        </span>
-        {t.game_name && <span className="item-sub">{t.icon_emoji} {t.game_name}</span>}
-        <span className="item-meta">
-          {formatDate(t.event_date)}
-          {t.location && ` · ${t.location}`}
-          {t.startgg_url && ' · Register link set'}
-        </span>
-        {t.description && <span className="item-meta" style={{ marginTop: 2 }}>{t.description}</span>}
-      </div>
-      {canManage && (
-        <div className="item-actions">
-          {t.status === 'upcoming' && (
-            <>
-              <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
+  const renderItem = (t, { showOverdueBadge = false } = {}) => {
+    const importResult = importResults[t.id];
+    return (
+      <div key={t.id} className="list-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="item-info" style={{ flex: 1 }}>
+            <span className="item-name">
+              {t.name}
               {showOverdueBadge && (
-                <button className="btn-ghost small" onClick={() => handleDismiss(t.id)} title="Mark as dismissed — won't appear in overdue list">
-                  Dismiss
-                </button>
+                <span className="tab-badge" style={{ marginLeft: 8, background: '#f59e0b', color: '#000', fontSize: 11 }}>
+                  Past date
+                </span>
               )}
+              {t.status === 'completed' && t.linked_tournament_id && (
+                <span className="tab-badge" style={{ marginLeft: 8, background: '#22c55e', color: '#000', fontSize: 11 }}>
+                  Imported
+                </span>
+              )}
+              {t.status === 'completed' && !t.linked_tournament_id && (
+                <span className="tab-badge" style={{ marginLeft: 8, background: 'var(--border)', color: 'var(--text-dim)', fontSize: 11 }}>
+                  Completed
+                </span>
+              )}
+            </span>
+            {t.game_name && <span className="item-sub">{t.icon_emoji} {t.game_name}</span>}
+            <span className="item-meta">
+              {formatDate(t.event_date)}
+              {t.location && ` · ${t.location}`}
+              {t.startgg_url && ' · Register link set'}
+              {t.registration_closes_at && ` · Reg. closes ${new Date(t.registration_closes_at).toLocaleString()}`}
+            </span>
+            {t.description && <span className="item-meta" style={{ marginTop: 2 }}>{t.description}</span>}
+          </div>
+          <div className="item-actions">
+            {t.status === 'upcoming' && canManage && (
+              <>
+                <button className="btn-ghost small" onClick={() => startEdit(t)}>Edit</button>
+                {showOverdueBadge && (
+                  <button className="btn-ghost small" onClick={() => handleDismiss(t.id)} title="Mark as dismissed">
+                    Dismiss
+                  </button>
+                )}
+                <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
+              </>
+            )}
+            {showOverdueBadge && canImport && t.startgg_url && (
+              <button
+                className="btn-secondary small"
+                onClick={() => handleForceImport(t.id)}
+                disabled={importingId === t.id}
+                title="Fetch standings from start.gg and import now"
+              >
+                {importingId === t.id ? 'Importing…' : 'Import Standings'}
+              </button>
+            )}
+            {t.status === 'completed' && canManage && (
               <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
-            </>
-          )}
-          {t.status === 'completed' && (
-            <button className="btn-danger small" onClick={() => handleDelete(t.id)}>Delete</button>
-          )}
+            )}
+          </div>
         </div>
-      )}
-    </div>
-  );
+        {importResult && (
+          <div
+            className={importResult.ok ? 'success-msg' : 'error-msg'}
+            style={{ fontSize: 12, padding: '4px 10px', marginTop: 2 }}
+          >
+            {importResult.ok
+              ? importResult.already_imported
+                ? 'Already imported — marked as completed.'
+                : `Imported ${importResult.count} player${importResult.count !== 1 ? 's' : ''}!`
+              : `Error: ${importResult.error}`}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="tab-content">
@@ -1737,9 +1786,20 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
               <input value={form.startgg_url} onChange={(e) => setForm(f => ({ ...f, startgg_url: e.target.value }))} placeholder="https://www.start.gg/tournament/…" />
             </div>
           </div>
-          <div className="form-group">
-            <label>Description <span className="dim">(optional)</span></label>
-            <input value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description…" />
+          <div className="form-row" style={{ flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: '2 1 260px' }}>
+              <label>Description <span className="dim">(optional)</span></label>
+              <input value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Brief description…" />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 220px' }}>
+              <label>Registration Closes <span className="dim">(optional)</span></label>
+              <input
+                type="datetime-local"
+                value={form.registration_closes_at}
+                onChange={(e) => setForm(f => ({ ...f, registration_closes_at: e.target.value }))}
+              />
+              <small>Hide register button after this date/time</small>
+            </div>
           </div>
           {error && <div className="error-msg">{error}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
