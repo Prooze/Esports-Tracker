@@ -92,27 +92,34 @@ app.get('/api/settings/public', (req, res) => {
 
 // ─── Public upcoming tournaments (no auth) ───────────────────────────────────
 app.get('/api/upcoming', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today  = new Date().toISOString().split('T')[0];
+  const nowIso = new Date().toISOString();
   const rows = db.prepare(`
     SELECT u.*, g.name AS game_name, g.icon_emoji, g.icon_path
     FROM upcoming_tournaments u
     LEFT JOIN games g ON u.game_id = g.id
-    WHERE u.event_date >= ? AND u.status = 'upcoming'
+    WHERE u.event_date >= ?
+      AND u.status = 'upcoming'
+      AND (u.registration_closes_at IS NULL OR u.registration_closes_at > ?)
     ORDER BY u.event_date ASC
-  `).all(today);
+  `).all(today, nowIso);
   res.json(rows);
 });
 
 // Upcoming tournaments for a specific game (no auth)
 app.get('/api/upcoming/game/:gameId', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today  = new Date().toISOString().split('T')[0];
+  const nowIso = new Date().toISOString();
   const rows = db.prepare(`
     SELECT u.*, g.name AS game_name, g.icon_emoji, g.icon_path
     FROM upcoming_tournaments u
     LEFT JOIN games g ON u.game_id = g.id
-    WHERE u.game_id = ? AND u.event_date >= ? AND u.status = 'upcoming'
+    WHERE u.game_id = ?
+      AND u.event_date >= ?
+      AND u.status = 'upcoming'
+      AND (u.registration_closes_at IS NULL OR u.registration_closes_at > ?)
     ORDER BY u.event_date ASC
-  `).all(req.params.gameId, today);
+  `).all(req.params.gameId, today, nowIso);
   res.json(rows);
 });
 

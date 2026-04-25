@@ -409,7 +409,7 @@ function extractTournamentSlug(url) {
   return m ? m[1] : null;
 }
 
-const TOURNAMENT_STATUS_QUERY = `query TournamentStatus($slug: String!) {
+const TOURNAMENT_STATUS_QUERY = `query TournamentCompletion($slug: String!) {
   tournament(slug: $slug) {
     id
     name
@@ -419,6 +419,11 @@ const TOURNAMENT_STATUS_QUERY = `query TournamentStatus($slug: String!) {
       name
       state
       videogame { id name }
+      phases {
+        id
+        name
+        state
+      }
       standings(query: { page: 1, perPage: 64 }) {
         nodes {
           placement
@@ -433,6 +438,22 @@ const TOURNAMENT_STATUS_QUERY = `query TournamentStatus($slug: String!) {
     }
   }
 }`;
+
+// An event is effectively complete if any of the following is true:
+//   1. event.state is 3 / "COMPLETED"
+//   2. Every phase in the event has state 3 / "COMPLETED" (and at least one phase exists)
+//   3. Standings contain a placement=1 entry with >= 2 total nodes (bracket resolved)
+function isEventEffectivelyComplete(event) {
+  if (isStateCompleted(event.state)) return true;
+
+  const phases = event.phases || [];
+  if (phases.length > 0 && phases.every((p) => isStateCompleted(p.state))) return true;
+
+  const nodes = event.standings?.nodes ?? [];
+  if (nodes.length >= 2 && nodes.some((n) => n.placement === 1)) return true;
+
+  return false;
+}
 
 // Persist standings rows for a matched event into the DB.
 // Returns { tournamentId, count } on success or throws.
@@ -463,19 +484,23 @@ function insertStandingsForEvent(upcoming, tournamentName, matchedEvent) {
 // Pick the best matching event from a tournament's event list given an upcoming record.
 function pickEvent(upcoming, events) {
   if (!events || events.length === 0) return null;
-  // 1. Exact videogame name match
+
+  // 1. Exact videogame name match (preferred)
   if (upcoming.game_name) {
     const exact = events.find(
       (e) => e.videogame?.name?.toLowerCase() === upcoming.game_name.toLowerCase()
     );
     if (exact) return exact;
   }
-  // 2. Completed event
-  const completedEvt = events.find((e) => isStateCompleted(e.state));
-  if (completedEvt) return completedEvt;
+
+  // 2. Any effectively-complete event
+  const effectiveDone = events.find((e) => isEventEffectivelyComplete(e));
+  if (effectiveDone) return effectiveDone;
+
   // 3. Active event
   const activeEvt = events.find((e) => isStateActive(e.state));
   if (activeEvt) return activeEvt;
+
   // 4. First event
   return events[0];
 }
@@ -540,18 +565,19 @@ async function checkAndCompleteUpcomingTournaments() {
         continue;
       }
 
-      clog('info', `#${upcoming.id}: matched event="${matchedEvent.name}" state=${matchedEvent.state} game=${matchedEvent.videogame?.name || '?'} nodes=${matchedEvent.standings?.nodes?.length ?? 0}`);
+      const phaseSummary = (matchedEvent.phases || []).map((p) => `"${p.name}" state=${p.state}`).join(', ');
+      clog('info', `#${upcoming.id}: matched event="${matchedEvent.name}" state=${matchedEvent.state} game=${matchedEvent.videogame?.name || '?'} nodes=${matchedEvent.standings?.nodes?.length ?? 0} phases=[${phaseSummary || 'none'}]`);
 
-      // Gate: require tournament OR matched event to be completed (state 3)
-      const tournamentDone = isStateCompleted(t.state);
-      const eventDone      = isStateCompleted(matchedEvent.state);
+      // Gate: tournament OR event must be effectively complete
+      const tournamentDone    = isStateCompleted(t.state);
+      const eventEffDone      = isEventEffectivelyComplete(matchedEvent);
 
-      if (!tournamentDone && !eventDone) {
-        clog('info', `#${upcoming.id}: neither tournament (state=${t.state}) nor matched event (state=${matchedEvent.state}) is completed — skipping`);
+      if (!tournamentDone && !eventEffDone) {
+        clog('info', `#${upcoming.id}: not yet complete — tournament state=${t.state}, event state=${matchedEvent.state}, phases all done=${( (matchedEvent.phases||[]).length > 0 && (matchedEvent.phases||[]).every((p)=>isStateCompleted(p.state)) )}, standings≥2+rank1=${ (matchedEvent.standings?.nodes?.length ?? 0) >= 2 && (matchedEvent.standings?.nodes||[]).some((n)=>n.placement===1) } — skipping`);
         continue;
       }
 
-      clog('info', `#${upcoming.id}: completed! tournament_state=${t.state} event_state=${matchedEvent.state} — attempting import`);
+      clog('info', `#${upcoming.id}: effectively complete — tournament_state=${t.state} event_state=${matchedEvent.state} — attempting import`);
 
       // Check for duplicate
       const alreadyImported = db.prepare('SELECT id FROM tournaments WHERE startgg_id = ?').get(String(matchedEvent.id));
@@ -624,14 +650,14 @@ router.post('/upcoming/:id/import-standings', checkPermission('manage_tournament
     if (!t) return res.status(404).json({ error: 'Tournament not found on start.gg' });
 
     const eventSummary = (t.events || [])
-      .map((e) => `"${e.name}" state=${e.state} nodes=${e.standings?.nodes?.length ?? '?'} game=${e.videogame?.name || '?'}`)
+      .map((e) => `"${e.name}" state=${e.state} effDone=${isEventEffectivelyComplete(e)} nodes=${e.standings?.nodes?.length ?? '?'} game=${e.videogame?.name || '?'} phases=${(e.phases||[]).length}`)
       .join(' | ');
-    clog('info', `[force-import] #${upcoming.id}: state=${t.state} events=[${eventSummary}]`);
+    clog('info', `[force-import] #${upcoming.id}: tournament state=${t.state} events=[${eventSummary}]`);
 
     const matchedEvent = pickEvent(upcoming, t.events || []);
     if (!matchedEvent) return res.status(400).json({ error: 'No events found for this tournament on start.gg' });
 
-    clog('info', `[force-import] #${upcoming.id}: matched event="${matchedEvent.name}" state=${matchedEvent.state} nodes=${matchedEvent.standings?.nodes?.length ?? 0}`);
+    clog('info', `[force-import] #${upcoming.id}: matched event="${matchedEvent.name}" state=${matchedEvent.state} effDone=${isEventEffectivelyComplete(matchedEvent)} nodes=${matchedEvent.standings?.nodes?.length ?? 0}`);
 
     const nodes = matchedEvent.standings?.nodes ?? [];
     if (nodes.length === 0) {

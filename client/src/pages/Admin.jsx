@@ -1710,7 +1710,7 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
     return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
-  const renderItem = (t, { showOverdueBadge = false } = {}) => {
+  const renderItem = (t, { showOverdueBadge = false, showRegClosedBadge = false } = {}) => {
     const importResult = importResults[t.id];
     return (
       <div key={t.id} className="list-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
@@ -1721,6 +1721,11 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
               {showOverdueBadge && (
                 <span className="tab-badge" style={{ marginLeft: 8, background: '#f59e0b', color: '#000', fontSize: 11 }}>
                   Past date
+                </span>
+              )}
+              {showRegClosedBadge && !showOverdueBadge && (
+                <span className="tab-badge" style={{ marginLeft: 8, background: '#6366f1', color: '#fff', fontSize: 11 }}>
+                  Reg. Closed – Awaiting Results
                 </span>
               )}
               {t.status === 'completed' && t.linked_tournament_id && (
@@ -1881,7 +1886,9 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
         {active.length === 0 && overdue.length === 0 ? (
           <div className="empty-state">No upcoming tournaments. Add one to display it on the public page.</div>
         ) : active.length === 0 ? null : (
-          active.map((t) => renderItem(t))
+          active.map((t) => renderItem(t, {
+            showRegClosedBadge: !!(t.registration_closes_at && new Date(t.registration_closes_at) < new Date()),
+          }))
         )}
       </div>
 
