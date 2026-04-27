@@ -19,9 +19,14 @@ const {
   getToken,
 } = require('./services/startgg');
 
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET is not set. Add it to server/.env before starting.');
+  process.exit(1);
+}
+
 const PORT = Number(process.env.PORT) || 3001;
 const BCRYPT_ROUNDS = 12;
-const AUTO_SYNC_INTERVAL_MS  = 60 * 60 * 1000;       // hourly
+const AUTO_SYNC_INTERVAL_MS  = 60 * 60 * 1000;
 const SYNC_DAILY_THRESHOLD_H = 24;
 const SYNC_WEEKLY_THRESHOLD_H = 24 * 7;
 
@@ -59,6 +64,12 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
 
