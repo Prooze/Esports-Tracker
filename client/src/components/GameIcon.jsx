@@ -1,4 +1,4 @@
-import { resolveImageUrl } from '../lib/api';
+import { resolveImageUrl } from '../utils/images';
 
 export default function GameIcon({ game, size = 64 }) {
   if (game.icon_path) {

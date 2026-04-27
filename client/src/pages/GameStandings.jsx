@@ -1,49 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
-import { apiBase, resolveImageUrl } from '../lib/api';
-
-function formatEventDate(dateStr) {
-  if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-');
-  return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, {
-    weekday: 'short', year: 'numeric', month: 'long', day: 'numeric',
-  });
-}
-
-function isRegistrationClosed(t) {
-  const now = new Date();
-  if (t.event_date) {
-    const [y, m, d] = t.event_date.split('-');
-    if (new Date(+y, +m - 1, +d) < now) return true;
-  }
-  if (t.registration_closes_at && new Date(t.registration_closes_at) < now) return true;
-  return false;
-}
-
-function applyRanks(rows) {
-  if (!Array.isArray(rows)) return [];
-  let rank = 1;
-  return rows.map((row, i) => {
-    if (i > 0 && row.total_points !== rows[i - 1].total_points) rank = i + 1;
-    return { ...row, rank };
-  });
-}
-
-function getRecordingInfo(url) {
-  if (!url) return null;
-  const ytMatch = url.match(/(?:[?&]v=|youtu\.be\/)([^&/?#]+)/);
-  if (ytMatch) {
-    return {
-      platform: 'youtube',
-      thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`,
-    };
-  }
-  if (/facebook\.com\/|fb\.watch\//i.test(url)) {
-    return { platform: 'facebook', thumbnail: null };
-  }
-  return null;
-}
+import { resolveImageUrl } from '../utils/images';
+import { formatEventDate, formatTournamentDate, isRegistrationClosed } from '../utils/dates';
+import { applyRanks } from '../utils/rankings';
+import { getRecordingInfo } from '../utils/streams';
+import { publicApi } from '../api';
 
 function TournamentRow({ tournament }) {
   const [expanded, setExpanded] = useState(false);
@@ -53,21 +15,19 @@ function TournamentRow({ tournament }) {
   const toggle = async () => {
     if (!expanded && !standings) {
       setLoading(true);
-      const res = await fetch(`${apiBase}/api/tournaments/${tournament.id}/standings`);
-      const data = await res.json();
-      setStandings(data.standings);
-      setLoading(false);
+      try {
+        const data = await publicApi.getTournamentStandings(tournament.id);
+        setStandings(data.standings);
+      } catch (_) {
+        setStandings([]);
+      } finally {
+        setLoading(false);
+      }
     }
     setExpanded((v) => !v);
   };
 
-  const dateStr = tournament.date
-    ? new Date(tournament.date + 'T12:00:00').toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      })
-    : 'No date';
+  const dateStr = tournament.date ? formatTournamentDate(tournament.date) : 'No date';
 
   return (
     <div className="tournament-row">
@@ -99,12 +59,9 @@ function TournamentRow({ tournament }) {
                   <tr
                     key={s.id}
                     className={
-                      s.placement === 1
-                        ? 'top-1'
-                        : s.placement === 2
-                        ? 'top-2'
-                        : s.placement === 3
-                        ? 'top-3'
+                      s.placement === 1 ? 'top-1'
+                        : s.placement === 2 ? 'top-2'
+                        : s.placement === 3 ? 'top-3'
                         : ''
                     }
                   >
@@ -127,24 +84,20 @@ function TournamentRow({ tournament }) {
 export default function GameStandings() {
   const { id } = useParams();
   const [game, setGame] = useState(null);
-  const [availableYears, setAvailableYears] = useState(null); // null = not yet loaded
+  const [availableYears, setAvailableYears] = useState(null);
   const [year, setYear] = useState(null);
   const [standings, setStandings] = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [upcoming, setUpcoming] = useState([]);
 
-  // Fetch upcoming tournaments for this game whenever the id changes.
   useEffect(() => {
     setUpcoming([]);
-    fetch(`${apiBase}/api/upcoming/game/${id}`)
-      .then((r) => r.json())
+    publicApi.getUpcomingForGame(id)
       .then((data) => { if (Array.isArray(data)) setUpcoming(data); })
       .catch(() => {});
   }, [id]);
 
-  // Bootstrap: fetch available years (and game info) whenever the game id changes.
-  // Also loads standings/tournaments for the most recent year automatically.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -155,25 +108,20 @@ export default function GameStandings() {
     setTournaments([]);
 
     async function bootstrap() {
-      const yearsRes = await fetch(`${apiBase}/api/games/${id}/years`);
-      if (!yearsRes.ok) throw new Error('Game not found');
-      const { game: g, years } = await yearsRes.json();
+      const { game: g, years } = await publicApi.getGameYears(id);
       if (cancelled) return;
 
       setGame(g);
       setAvailableYears(years);
 
-      if (years.length === 0) {
-        setLoading(false);
-        return;
-      }
+      if (years.length === 0) { setLoading(false); return; }
 
       const latestYear = years[0];
       setYear(latestYear);
 
       const [sData, tData] = await Promise.all([
-        fetch(`${apiBase}/api/games/${id}/standings?year=${latestYear}`).then((r) => r.json()),
-        fetch(`${apiBase}/api/games/${id}/tournaments?year=${latestYear}`).then((r) => r.json()),
+        publicApi.getGameStandings(id, latestYear),
+        publicApi.getGameTournaments(id, latestYear),
       ]);
       if (cancelled) return;
 
@@ -186,22 +134,26 @@ export default function GameStandings() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // Called when the user clicks a different year button.
   const handleYearChange = async (yr) => {
     if (yr === year) return;
     setYear(yr);
     setLoading(true);
-    const [sData, tData] = await Promise.all([
-      fetch(`${apiBase}/api/games/${id}/standings?year=${yr}`).then((r) => r.json()),
-      fetch(`${apiBase}/api/games/${id}/tournaments?year=${yr}`).then((r) => r.json()),
-    ]);
-    setStandings(applyRanks(sData.standings));
-    setTournaments(tData);
-    setLoading(false);
+    try {
+      const [sData, tData] = await Promise.all([
+        publicApi.getGameStandings(id, yr),
+        publicApi.getGameTournaments(id, yr),
+      ]);
+      setStandings(applyRanks(sData.standings));
+      setTournaments(tData);
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading || availableYears === null) return <div className="loading">Loading...</div>;
   if (!game) return <div className="container"><p>Game not found.</p></div>;
+
+  const recordings = tournaments.filter((t) => t.recording_url);
 
   return (
     <main className="container">
@@ -275,20 +227,18 @@ export default function GameStandings() {
               <div className="empty-state">No tournaments for {year}.</div>
             ) : (
               <div className="tournament-list">
-                {tournaments.map((t) => (
-                  <TournamentRow key={t.id} tournament={t} />
-                ))}
+                {tournaments.map((t) => <TournamentRow key={t.id} tournament={t} />)}
               </div>
             )}
           </section>
         </>
       )}
 
-      {tournaments.filter((t) => t.recording_url).length > 0 && (
+      {recordings.length > 0 && (
         <section className="section">
           <h2 className="section-title">Past Recordings</h2>
           <div className="recording-grid">
-            {tournaments.filter((t) => t.recording_url).map((t) => {
+            {recordings.map((t) => {
               const info = getRecordingInfo(t.recording_url);
               return (
                 <a
@@ -306,13 +256,7 @@ export default function GameStandings() {
                   </div>
                   <div className="recording-info">
                     <div className="recording-name">{t.name}</div>
-                    {t.date && (
-                      <div className="recording-date">
-                        {new Date(t.date + 'T12:00:00').toLocaleDateString(undefined, {
-                          year: 'numeric', month: 'short', day: 'numeric',
-                        })}
-                      </div>
-                    )}
+                    {t.date && <div className="recording-date">{formatTournamentDate(t.date)}</div>}
                   </div>
                 </a>
               );

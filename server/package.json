@@ -2,10 +2,10 @@
   "name": "esports-tracker-server",
   "version": "1.0.0",
   "description": "Esports Tracker API server",
-  "main": "src/app.js",
+  "main": "index.js",
   "scripts": {
-    "dev": "nodemon src/app.js",
-    "start": "node src/app.js"
+    "dev": "nodemon index.js",
+    "start": "node index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

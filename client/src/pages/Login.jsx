@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { apiBase } from '../lib/api';
+import { authApi } from '../api';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -19,21 +19,11 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${apiBase}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || 'Login failed');
-      } else {
-        login(data.token);
-        navigate('/admin');
-      }
-    } catch {
-      setError('Network error — is the server running?');
+      const data = await authApi.login(username, password);
+      login(data.token);
+      navigate('/admin');
+    } catch (err) {
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }

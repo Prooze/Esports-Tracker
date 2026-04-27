@@ -1,7 +1,17 @@
-require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+/**
+ * Create the first superadmin account.
+ *
+ * Usage:
+ *   node scripts/createFirstAdmin.js <username> <password>
+ *
+ * Refuses to run if any admin already exists — use the in-app Accounts tab
+ * to manage subsequent admins.
+ */
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const bcrypt = require('bcryptjs');
-const db = require('../src/db');
+const db = require('../db');
 
+const BCRYPT_ROUNDS = 12;
 const [, , username, password] = process.argv;
 
 if (!username || !password) {
@@ -15,7 +25,7 @@ if (count > 0) {
   process.exit(1);
 }
 
-bcrypt.hash(password, 12).then((hash) => {
+bcrypt.hash(password, BCRYPT_ROUNDS).then((hash) => {
   db.prepare(
     "INSERT INTO admins (username, password_hash, permissions, is_superadmin) VALUES (?, ?, '[]', 1)"
   ).run(username, hash);

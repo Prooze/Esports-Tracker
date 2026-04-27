@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
-import { resolveImageUrl } from '../lib/api';
+import { resolveImageUrl } from '../utils/images';
 
 export default function Navbar() {
   const { token, user, logout } = useAuth();

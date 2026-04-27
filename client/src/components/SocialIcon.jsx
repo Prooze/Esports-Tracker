@@ -1,5 +1,4 @@
-// SVG icon render functions for supported social platforms
-// Using functions (not module-level JSX elements) for React 18 compatibility
+// SVG icon rendering for supported social platforms.
 
 export const SOCIAL_PLATFORMS = [
   { key: 'twitter',   label: 'Twitter / X' },

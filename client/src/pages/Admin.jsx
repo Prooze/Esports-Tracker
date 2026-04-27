@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef, Component } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import GameIcon from '../components/GameIcon';
-import { apiBase, resolveImageUrl } from '../lib/api';
-import { SOCIAL_PLATFORMS, SocialIcon } from '../lib/socialIcons';
+import { apiBase, resolveImageUrl } from '../utils/images';
+import { SOCIAL_PLATFORMS, SocialIcon } from '../components/SocialIcon';
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 class AdminErrorBoundary extends Component {

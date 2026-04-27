@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { apiBase, resolveImageUrl } from '../lib/api';
+import { resolveImageUrl } from '../utils/images';
+import { hexToRgba } from '../utils/colors';
+import { publicApi } from '../api';
 
 const BrandingContext = createContext(null);
 
@@ -19,13 +21,7 @@ const DEFAULTS = {
   stream_active:       false,
 };
 
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
+/** Push the active branding values into CSS custom properties + favicon link. */
 function applyBrandingVars(branding) {
   const root = document.documentElement;
 
@@ -33,7 +29,7 @@ function applyBrandingVars(branding) {
     root.style.setProperty('--accent', branding.accent_color);
     try {
       root.style.setProperty('--accent-glow', hexToRgba(branding.accent_color, 0.18));
-    } catch (_) {}
+    } catch (_) { /* malformed hex — ignore */ }
   }
 
   if (branding.primary_color) {
@@ -54,27 +50,22 @@ function applyBrandingVars(branding) {
 export function BrandingProvider({ children }) {
   const [branding, setBranding] = useState(DEFAULTS);
 
-  const reloadBranding = useCallback(() => {
-    fetch(`${apiBase}/api/settings/public`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (!data || typeof data !== 'object') return;
-        // Ensure arrays are arrays (defensive against unexpected server values)
-        const safe = {
-          ...data,
-          footer_links: Array.isArray(data.footer_links) ? data.footer_links : [],
-          social_links:  Array.isArray(data.social_links)  ? data.social_links  : [],
-        };
-        const merged = { ...DEFAULTS, ...safe };
-        setBranding(merged);
-        applyBrandingVars(merged);
-      })
-      .catch(() => {
-        // Network error or bad JSON — keep defaults, don't crash
-      });
+  const reloadBranding = useCallback(async () => {
+    try {
+      const data = await publicApi.getSettings();
+      if (!data || typeof data !== 'object') return;
+      // Defensive: ensure arrays are arrays
+      const safe = {
+        ...data,
+        footer_links: Array.isArray(data.footer_links) ? data.footer_links : [],
+        social_links: Array.isArray(data.social_links) ? data.social_links : [],
+      };
+      const merged = { ...DEFAULTS, ...safe };
+      setBranding(merged);
+      applyBrandingVars(merged);
+    } catch (_) {
+      // Network error — keep defaults
+    }
   }, []);
 
   useEffect(() => {

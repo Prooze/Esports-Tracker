@@ -10,6 +10,10 @@ function getDb() {
   return _db;
 }
 
+/**
+ * Read Cloudinary credentials. DB settings take precedence over environment
+ * variables so admins can rotate keys live without redeploying.
+ */
 function getConfig() {
   try {
     const db = getDb();
@@ -32,15 +36,18 @@ function isConfigured(cfg) {
   return !!(cfg.cloud_name && cfg.api_key && cfg.api_secret);
 }
 
-// Extract public_id from a Cloudinary URL so we can delete it later.
-// URL format: https://res.cloudinary.com/{cloud}/image/upload/v{ver}/{public_id}.{ext}
+/**
+ * Extract the Cloudinary public_id from an image URL so we can delete it later.
+ * URL format: https://res.cloudinary.com/{cloud}/image/upload/v{ver}/{public_id}.{ext}
+ */
 function getPublicId(url) {
   if (!url || !url.includes('cloudinary.com')) return null;
   const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
   if (!match) return null;
-  return match[1].replace(/\.[^.]+$/, ''); // strip extension
+  return match[1].replace(/\.[^.]+$/, '');
 }
 
+/** Best-effort delete of an image — silently no-ops on non-Cloudinary URLs. */
 async function destroyIfCloudinary(url) {
   const publicId = getPublicId(url);
   if (!publicId) return;
@@ -48,12 +55,24 @@ async function destroyIfCloudinary(url) {
     cloudinary.config(getConfig());
     await cloudinary.uploader.destroy(publicId);
   } catch (_) {
-    // Non-fatal — image may already be deleted
+    // Non-fatal — image may already be deleted, or credentials may have been rotated
   }
 }
 
+/** Reject any file that isn't an image based on its mimetype. */
+function imageOnlyFilter(_req, file, cb) {
+  if (!file.mimetype.startsWith('image/')) {
+    return cb(new Error('Only image files are allowed'));
+  }
+  cb(null, true);
+}
+
+/**
+ * Multer disk storage fallback used when Cloudinary credentials aren't set.
+ * Files go into server/uploads/{folder}/ and are served via /uploads/* in app.js.
+ */
 function localUpload(folder, publicIdFn, sizeLimitMb, fieldName, req, res, next) {
-  const uploadsDir = path.join(__dirname, '../../uploads', folder);
+  const uploadsDir = path.join(__dirname, '..', 'uploads', folder);
   fs.mkdirSync(uploadsDir, { recursive: true });
 
   const storage = multer.diskStorage({
@@ -67,23 +86,25 @@ function localUpload(folder, publicIdFn, sizeLimitMb, fieldName, req, res, next)
   multer({
     storage,
     limits: { fileSize: sizeLimitMb * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      if (!file.mimetype.startsWith('image/')) return cb(new Error('Only image files are allowed'));
-      cb(null, true);
-    },
+    fileFilter: imageOnlyFilter,
   }).single(fieldName)(req, res, (err) => {
     if (err) return next(err);
     if (req.file) {
-      const rel = path.relative(path.join(__dirname, '../../uploads'), req.file.path);
+      const rel = path.relative(path.join(__dirname, '..', 'uploads'), req.file.path);
       req.file.path = `/uploads/${rel.replace(/\\/g, '/')}`;
     }
     next();
   });
 }
 
-// Returns an object with a .single() method compatible with multer instances.
-// Config is read from DB (with env var fallback) per-request, so credentials
-// updated in the Integrations settings take effect immediately.
+/**
+ * Build a multer-compatible uploader. Config is read from DB on every request,
+ * so credentials updated in the Integrations tab take effect immediately.
+ *
+ * @param {string} folder Cloudinary folder (also used for local fallback)
+ * @param {(req: any, file: any) => string} publicIdFn Generates a per-file id
+ * @param {number} sizeLimitMb Max upload size in megabytes
+ */
 function makeUpload(folder, publicIdFn, sizeLimitMb = 5) {
   return {
     single(fieldName) {
@@ -104,10 +125,7 @@ function makeUpload(folder, publicIdFn, sizeLimitMb = 5) {
         multer({
           storage,
           limits: { fileSize: sizeLimitMb * 1024 * 1024 },
-          fileFilter: (_req, file, cb) => {
-            if (!file.mimetype.startsWith('image/')) return cb(new Error('Only image files are allowed'));
-            cb(null, true);
-          },
+          fileFilter: imageOnlyFilter,
         }).single(fieldName)(req, res, next);
       };
     },

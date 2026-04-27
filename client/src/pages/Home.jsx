@@ -2,52 +2,10 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import GameIcon from '../components/GameIcon';
 import { useBranding } from '../context/BrandingContext';
-import { apiBase, resolveImageUrl } from '../lib/api';
-
-function formatEventDate(dateStr) {
-  if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-');
-  return new Date(+y, +m - 1, +d).toLocaleDateString(undefined, {
-    weekday: 'short', year: 'numeric', month: 'long', day: 'numeric',
-  });
-}
-
-function isRegistrationClosed(t) {
-  const now = new Date();
-  if (t.event_date) {
-    const [y, m, d] = t.event_date.split('-');
-    if (new Date(+y, +m - 1, +d) < now) return true;
-  }
-  if (t.registration_closes_at && new Date(t.registration_closes_at) < now) return true;
-  return false;
-}
-
-function detectPlatform(url) {
-  if (!url) return null;
-  if (/twitch\.tv\//i.test(url)) return 'twitch';
-  if (/youtube\.com\/|youtu\.be\//i.test(url)) return 'youtube';
-  if (/facebook\.com\/|fb\.watch\//i.test(url)) return 'facebook';
-  return null;
-}
-
-function getEmbedUrl(url, platform) {
-  if (platform === 'twitch') {
-    const m = url.match(/twitch\.tv\/([^/?#]+)/i);
-    const channel = m ? m[1] : '';
-    const domain = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-    return `https://player.twitch.tv/?channel=${channel}&parent=${domain}`;
-  }
-  if (platform === 'youtube') {
-    const m1 = url.match(/[?&]v=([^&]+)/);
-    const m2 = url.match(/youtu\.be\/([^/?#]+)/);
-    const videoId = m1 ? m1[1] : m2 ? m2[1] : '';
-    return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-  }
-  if (platform === 'facebook') {
-    return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&autoplay=true`;
-  }
-  return null;
-}
+import { resolveImageUrl } from '../utils/images';
+import { formatEventDate, isRegistrationClosed } from '../utils/dates';
+import { detectPlatform, getEmbedUrl } from '../utils/streams';
+import { publicApi } from '../api';
 
 export default function Home() {
   const [games, setGames] = useState([]);
@@ -56,13 +14,12 @@ export default function Home() {
   const { branding } = useBranding();
 
   useEffect(() => {
-    fetch(`${apiBase}/api/games`)
-      .then((r) => r.json())
-      .then((data) => { setGames(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    publicApi.getGames()
+      .then((data) => setGames(Array.isArray(data) ? data : []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
 
-    fetch(`${apiBase}/api/upcoming`)
-      .then((r) => r.json())
+    publicApi.getUpcoming()
       .then((data) => { if (Array.isArray(data)) setUpcoming(data); })
       .catch(() => {});
   }, []);
@@ -142,9 +99,7 @@ export default function Home() {
                   : t.icon_emoji && <span className="upcoming-game-emoji">{t.icon_emoji}</span>
                 }
                 <div className="upcoming-card-header">
-                  {t.game_name && (
-                    <span className="upcoming-game">{t.game_name}</span>
-                  )}
+                  {t.game_name && <span className="upcoming-game">{t.game_name}</span>}
                   <span className="upcoming-date">{formatEventDate(t.event_date)}</span>
                 </div>
                 <div className="upcoming-card-name">{t.name}</div>
