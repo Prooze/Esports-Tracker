@@ -1,32 +1,72 @@
 # Esports Tracker
 
-A self-hosted esports tournament standings tracker with start.gg integration. Operators run a single admin account (or team) to import tournament results; visitors see public leaderboards and upcoming events.
-
-**Stack:** React + Vite · Node.js + Express · SQLite (better-sqlite3) · JWT auth · Cloudinary (optional)
+A self-hosted tournament standings and leaderboard app for local and regional esports communities. Operators import results from [start.gg](https://www.start.gg/) or manually, and players browse a branded public site showing season rankings, upcoming events, and tournament history.
 
 ---
 
 ## Features
 
-**Public site**
-- Per-game season leaderboards with year selector
-- Expandable tournament result panels with placement + points
-- Upcoming tournament cards with registration links
-- Live stream embed (Twitch, YouTube Live, Facebook Live)
-- Customisable branding — site name, colours, logo, hero banner, announcement bar, footer links, social icons
+### Public site
+- **Season leaderboards** — per-game standings with a year selector; tied players share a rank and the next rank skips
+- **Tournament history** — expandable result panels showing placements, points, and optional recording links
+- **Upcoming events** — registration cards with deadlines; auto-filters events whose registration has closed
+- **Live stream embed** — configurable Twitch, YouTube Live, or Facebook Live embed on the home page
+- **Custom branding** — site name, tagline, primary/accent colors, logo, hero banner, announcement bar, footer links, and social icons
 
-**Admin panel** (`/admin`)
-- Import tournament results directly from a start.gg URL (auto-detects game, date, entrants)
-- Manually add / edit / delete tournaments and standings
-- Manage games (name, emoji, optional icon image)
-- Upcoming tournament management with auto-completion detection
-- Organizer sync — pull upcoming events from a start.gg profile on a schedule
-- Cloudinary integration for image hosting (falls back to local disk)
-- Multi-account support with per-permission access control
+### Admin panel (`/admin`)
+- **Import from start.gg** — paste a tournament URL; the app fetches the bracket and creates standings automatically
+- **Manual CRUD** — create, edit, and delete games, tournaments, and standings without touching start.gg
+- **Upcoming tournament management** — track pre-event registrations; force-import standings when start.gg state lags
+- **Organizer sync** — configure a start.gg profile URL; the app pulls upcoming events on a schedule
+- **Auto-completion checker** — background job (hourly) queries start.gg and auto-imports results for overdue events
+- **Cloudinary integration** — manage image-hosting credentials in the UI; falls back to local disk storage when unconfigured
+- **Admin accounts** — granular permissions: `manage_games`, `manage_tournaments`, `manage_upcoming`, `manage_branding`, `manage_integrations`, `manage_accounts`
 
 ---
 
-## Local Development
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, Vite 5, React Router 6 |
+| Backend | Express 4, Node.js 18 |
+| Database | SQLite via better-sqlite3 (WAL mode) |
+| Auth | JWT (jsonwebtoken) + bcryptjs |
+| Image hosting | Cloudinary (optional) or local disk |
+| External API | start.gg GraphQL API |
+
+---
+
+## Project structure
+
+```
+esports-tracker/
+├── client/                  React + Vite frontend
+│   └── src/
+│       ├── api/             Typed API client (publicApi, authApi, adminApi)
+│       ├── components/      Shared UI components (Navbar, Footer, GameIcon, …)
+│       ├── context/         AuthContext, BrandingContext
+│       ├── pages/           Home, GameStandings, Login, Admin
+│       └── utils/           dates, images, rankings, streams, colors
+└── server/                  Express API
+    ├── db/                  Schema, migrations, better-sqlite3 connection
+    ├── middleware/           auth (JWT), errorHandler, rateLimit
+    ├── routes/              Public and admin API routes
+    │   └── admin/           games, tournaments, accounts, upcoming, startgg, branding, integrations
+    ├── scripts/             createFirstAdmin.js, hashPassword.js
+    ├── services/            startgg.js, completionChecker.js, cloudinary.js, points.js
+    └── utils/               errors.js
+```
+
+---
+
+## Setup
+
+### Prerequisites
+
+- **Node.js 18+**
+- A [start.gg Personal Access Token](https://developer.start.gg/docs/authentication) (optional — needed for imports)
+- A [Cloudinary account](https://cloudinary.com/) (optional — for cloud image hosting)
 
 ### 1. Install dependencies
 
@@ -35,116 +75,140 @@ cd server && npm install
 cd ../client && npm install
 ```
 
-### 2. Configure the server
+### 2. Configure environment variables
 
 ```bash
 cp server/.env.example server/.env
 ```
 
-Edit `server/.env` and set at minimum:
+Edit `server/.env`. See the [Environment variables](#environment-variables) table below.
 
-```
-JWT_SECRET=<long random string>
-FIRST_ADMIN_USER=admin
-FIRST_ADMIN_PASS=<your password>
-```
+### 3. Create the first admin account
 
-Generate a JWT secret with: `openssl rand -hex 32`
+Either set `FIRST_ADMIN_USER` and `FIRST_ADMIN_PASS` in `.env` (the account is created automatically on first boot), or run:
 
-The `FIRST_ADMIN_*` variables create a superadmin on first boot. They are ignored once any admin account exists.
-
-### 3. Run both servers
-
-**Terminal 1 — API server (port 3001)**
 ```bash
+cd server
+node scripts/createFirstAdmin.js <username> <password>
+```
+
+This refuses to run if any admin account already exists.
+
+### 4. Start development servers
+
+```bash
+# Terminal 1 — API (port 3001)
 cd server && npm run dev
-```
 
-**Terminal 2 — Vite dev server (port 5173)**
-```bash
+# Terminal 2 — Vite dev server (port 5173)
 cd client && npm run dev
 ```
 
-Open **http://localhost:5173** — the Vite dev server proxies `/api` and `/uploads` to port 3001 automatically.
-
-### 4. Add a start.gg API token
-
-1. Log in at `/login`
-2. Go to **Admin → Integrations**
-3. Paste your start.gg Personal Access Token
-   *(start.gg → top-right menu → Developer → Personal Access Tokens)*
+Open **http://localhost:5173**. The Vite dev server proxies `/api` and `/uploads` to port 3001 automatically.
 
 ---
 
-## Environment Variables
+## Environment variables
 
-All variables live in `server/.env`. Only `JWT_SECRET` is strictly required for production.
+All variables are read by the server. Copy `.env.example` to `.env` and fill in the values.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `JWT_SECRET` | Yes | — | Secret for signing admin JWTs. Use a long random string. |
-| `PORT` | No | `3001` | HTTP port the server listens on. |
-| `CLIENT_ORIGIN` | No | — | Production frontend URL added to CORS allowlist. |
-| `DB_PATH` | No | `./data/database.sqlite` | Path to the SQLite database file. |
-| `FIRST_ADMIN_USER` | No | — | Username for the auto-created superadmin on first boot. |
-| `FIRST_ADMIN_PASS` | No | — | Password for the auto-created superadmin on first boot. |
-| `CLOUDINARY_CLOUD_NAME` | No | — | Cloudinary cloud name for image hosting. |
-| `CLOUDINARY_API_KEY` | No | — | Cloudinary API key. |
-| `CLOUDINARY_API_SECRET` | No | — | Cloudinary API secret. |
-
-Cloudinary credentials can also be set at runtime in **Admin → Integrations** — database values take precedence over env vars.
+| `JWT_SECRET` | **Yes** | — | Secret used to sign and verify JWTs. Generate one with `openssl rand -hex 32`. The server exits on startup if this is unset. |
+| `PORT` | No | `3001` | Port the Express server listens on. |
+| `CLIENT_ORIGIN` | No | — | Production frontend URL added to the CORS allowlist. `http://localhost:5173` is always allowed. |
+| `DB_PATH` | No | `./data/database.sqlite` | SQLite file location. Use an absolute path when deploying (e.g. `/app/data/database.sqlite`) and mount persistent storage at that directory. |
+| `FIRST_ADMIN_USER` | No | — | Username for an auto-created superadmin on first boot. Ignored once any admin account exists. |
+| `FIRST_ADMIN_PASS` | No | — | Password for the auto-created superadmin. Hashed with bcryptjs (12 rounds) before storage. |
+| `CLOUDINARY_CLOUD_NAME` | No | — | Cloudinary cloud name. Credentials set in Admin → Integrations take precedence over this value. |
+| `CLOUDINARY_API_KEY` | No | — | Cloudinary API key. DB value takes precedence. |
+| `CLOUDINARY_API_SECRET` | No | — | Cloudinary API secret. DB value takes precedence. |
 
 ---
 
-## Project Structure
+## Deployment
 
+The client and server are deployed as two separate services.
+
+### Railway (recommended)
+
+The repo includes `railway.json` and `nixpacks.toml` for both services.
+
+#### Server service
+
+1. Create a Railway project and add a service pointing at the `server/` directory.
+2. Add a **Volume** mounted at `/app/data` for persistent SQLite storage.
+3. Set `DB_PATH=/app/data/database.sqlite`.
+4. Set `JWT_SECRET`, `CLIENT_ORIGIN`, and (on first deploy) `FIRST_ADMIN_USER` + `FIRST_ADMIN_PASS`.
+5. Deploy — Railway detects Node via nixpacks and runs `npm start`.
+
+#### Client service
+
+1. Add a second service pointing at the `client/` directory.
+2. Set the API base URL in `client/src/api/index.js` to the server service's public domain, or expose it via a Vite env variable.
+3. Deploy — Railway runs `npm run build` and serves the output.
+
+### Self-hosted (nginx + PM2)
+
+```bash
+# Build the frontend
+cd client && npm run build
+# Copy client/dist/ to your nginx web root or serve with 'npm start' (uses 'serve')
+
+# Start the API with PM2
+cd server
+JWT_SECRET=<secret> CLIENT_ORIGIN=https://your-domain.com pm2 start index.js --name esports-tracker
 ```
-esports-tracker/
-├── client/                   React + Vite frontend
-│   └── src/
-│       ├── api/              Centralised fetch client (publicApi, authApi, adminApi)
-│       ├── components/       GameIcon, Navbar, SiteFooter, SocialIcon
-│       ├── context/          AuthContext, BrandingContext
-│       ├── pages/            Home, GameStandings, Login, Admin
-│       ├── utils/            dates, images, rankings, streams, colors
-│       └── index.css         All styles (CSS variables, dark theme)
-│
-└── server/                   Express API
-    ├── db/                   SQLite connection, schema, migrations
-    ├── middleware/            auth (JWT), rateLimit, errorHandler
-    ├── routes/
-    │   ├── auth.js           POST /api/auth/login
-    │   ├── games.js          GET  /api/games
-    │   ├── tournaments.js    GET  /api/tournaments/:id/standings
-    │   ├── public.js         GET  /api/settings/public, /api/upcoming
-    │   └── admin/            Protected admin routes (games, tournaments,
-    │                         upcoming, branding, integrations, startgg, accounts)
-    ├── services/             startgg (GraphQL), cloudinary, completionChecker, points
-    ├── utils/                errors (sendError helper)
-    ├── scripts/              createFirstAdmin.js, hashPassword.js
-    ├── app.js                Express app setup, route mounting
-    └── index.js              Entry point (loads .env, starts server)
+
+Minimal nginx block (single domain, API under `/api`):
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    root /var/www/esports-tracker;   # path to client/dist/
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://localhost:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
 ```
+
+Run `certbot --nginx -d your-domain.com` to add HTTPS.
+
+### Docker
+
+There is no Dockerfile included. The simplest approach is the Railway deployment above. For a custom Docker setup, use a multi-stage build: install and build the client in one stage, then copy the output alongside the server in the final image.
 
 ---
 
 ## Database
 
-SQLite file at `server/data/database.sqlite` (created automatically). Schema and migrations run on every startup — safe to re-run.
+SQLite is used for simplicity and zero-dependency hosting. The database file is created automatically at `server/data/database.sqlite` (or `DB_PATH` if set). Schema and migrations run on every startup and are fully idempotent.
 
 | Table | Purpose |
 |---|---|
-| `games` | Configured games (name, emoji, optional icon) |
+| `games` | Configured games (name, emoji icon, optional image) |
 | `tournaments` | Tournament records linked to a game |
 | `standings` | Per-player placements and season points |
 | `upcoming_tournaments` | Future events shown on the public site |
-| `admin_accounts` | Admin users with hashed passwords and permissions |
+| `admins` | Admin users with bcrypt-hashed passwords and permissions |
 | `settings` | Key/value store for branding and integration config |
 | `pending_games` | Games found during organizer sync awaiting admin review |
 
 ---
 
-## Points System
+## Points schedule
+
+Season standings are computed by summing points earned across all tournaments a player attended in a given year.
 
 | Placement | Points |
 |---|---|
@@ -160,36 +224,35 @@ SQLite file at `server/data/database.sqlite` (created automatically). Schema and
 | 25th–32nd | 8 |
 | 33rd+ | 5 |
 
----
-
-## Deployment (Railway)
-
-1. Create a Railway project with two services: **server** (Node) and **client** (static).
-2. Attach a Volume to the server service and set `DB_PATH=/app/data/database.sqlite`.
-3. Set `CLIENT_ORIGIN` to the client's public URL in the server's environment.
-4. Set `VITE_API_URL` to the server's public URL in the client's environment.
-5. Set `JWT_SECRET`, `FIRST_ADMIN_USER`, `FIRST_ADMIN_PASS` in the server environment.
-6. The server's `railway.json` and `nixpacks.toml` are already configured for this layout.
+Tied players (e.g. joint 5th–6th from the same bracket round) share the same placement number and earn identical points.
 
 ---
 
-## Creating an Admin Account Manually
+## start.gg integration
 
-If you skipped `FIRST_ADMIN_*` or need to create additional accounts outside the UI:
+1. In the admin panel go to **Settings → Integrations** and paste your Personal Access Token (start.gg → top-right menu → Developer → Personal Access Tokens).
+2. Optionally enter your organizer profile URL to enable auto-sync.
+
+**Import flow:** Admin → Start.gg → paste tournament URL → pick event → confirm. The app fetches the top-64 standings and writes the tournament and standings records in one step.
+
+**Organizer sync:** When an organizer URL is configured, the server queries it on the configured schedule (manual, daily, or weekly) and adds upcoming events. Events for unrecognised games go into a **Pending Games** queue for manual review.
+
+**Auto-completion:** Every hour the server checks upcoming tournaments whose event date has passed. If start.gg reports the event as complete (or the bracket has resolved despite a stale `ACTIVE` state), standings are imported automatically and the upcoming entry is marked completed.
+
+---
+
+## Utility scripts
 
 ```bash
-cd server
-node scripts/createFirstAdmin.js <username> <password>
-```
+# Create the first superadmin (only works when no admins exist)
+cd server && node scripts/createFirstAdmin.js <username> <password>
 
-This creates a **superadmin** with all permissions. Additional limited accounts can be created inside the admin panel under the **Accounts** tab.
+# Print the bcrypt hash of a password (useful for manual DB restoration)
+cd server && node scripts/hashPassword.js <password>
+```
 
 ---
 
-## Contributing
+## License
 
-1. Fork the repo and create a feature branch.
-2. Run `npm run dev` in both `server/` and `client/`.
-3. Keep the server flat (`routes/`, `services/`, `middleware/`, `db/`) — no nested `src/`.
-4. All API errors must use `sendError(res, status, message)` → `{ error: true, message }`.
-5. Open a pull request with a clear description of what changed and why.
+MIT

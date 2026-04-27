@@ -26,16 +26,22 @@ async function startggQuery(query, variables, token) {
   return json.data;
 }
 
-/** Read the saved start.gg API token from settings, or null. */
+/**
+ * Read the saved start.gg API token from the settings table.
+ * @returns {string|null} The stored token, or null if not configured.
+ */
 function getToken() {
   return db.prepare("SELECT value FROM settings WHERE key = 'startgg_token'").get()?.value || null;
 }
 
 /**
  * Extract the bare tournament slug from any start.gg URL variant.
- *   https://www.start.gg/tournament/my-slug/register   → my-slug
- *   https://www.start.gg/tournament/my-slug/event/foo  → my-slug
- *   https://start.gg/tournament/my-slug                → my-slug
+ *   `https://www.start.gg/tournament/my-slug/register`  → `my-slug`
+ *   `https://www.start.gg/tournament/my-slug/event/foo` → `my-slug`
+ *   `https://start.gg/tournament/my-slug`               → `my-slug`
+ *
+ * @param {string|null} url Any start.gg tournament URL.
+ * @returns {string|null} The bare slug, or null if the URL cannot be parsed.
  */
 function extractTournamentSlug(url) {
   if (!url) return null;
@@ -43,7 +49,11 @@ function extractTournamentSlug(url) {
   return m ? m[1] : null;
 }
 
-/** Extract the bare organizer slug from a /user/ or /org/ start.gg URL. */
+/**
+ * Extract the bare organizer slug from a start.gg `/user/` or `/org/` URL.
+ * @param {string|null} url A start.gg user or org profile URL.
+ * @returns {string|null} The bare slug, or null if the URL cannot be parsed.
+ */
 function extractOrganizerSlug(url) {
   if (!url) return null;
   const m = url.match(/start\.gg\/(?:user|org)\/([^/?#]+)/);
@@ -119,13 +129,24 @@ const ORGANIZER_TOURNAMENTS_QUERY = `query OrganizerTournaments($slug: String!) 
   }
 }`;
 
-/** Look up a tournament by slug. Returns the raw tournament object or null. */
+/**
+ * Look up a tournament on start.gg by its slug.
+ * @param {string} slug Bare tournament slug (e.g. `my-tournament`).
+ * @param {string} token start.gg Personal Access Token.
+ * @returns {Promise<object|null>} The tournament object (id, name, startAt, events), or null if not found.
+ */
 async function lookupTournament(slug, token) {
   const data = await startggQuery(TOURNAMENT_LOOKUP_QUERY, { slug }, token);
   return data.tournament || null;
 }
 
-/** Fetch the top-`perPage` standings for an event. Returns the array of nodes. */
+/**
+ * Fetch the top standings for a start.gg event (page 1 only).
+ * @param {string|number} eventId The start.gg event ID.
+ * @param {string} token start.gg Personal Access Token.
+ * @param {number} [perPage=64] Maximum number of standings to return.
+ * @returns {Promise<Array<{placement:number, entrant:{name:string}}>>} Standing nodes.
+ */
 async function fetchEventStandings(eventId, token, perPage = 64) {
   const data = await startggQuery(
     EVENT_STANDINGS_QUERY,

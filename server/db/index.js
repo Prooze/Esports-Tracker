@@ -8,6 +8,14 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'datab
 const dataDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
+/**
+ * Shared better-sqlite3 Database instance. Opened in WAL mode for concurrent
+ * reads and with foreign-key enforcement enabled. Schema and migrations are
+ * applied synchronously at startup so the database is always ready by the time
+ * the first route handler runs.
+ *
+ * @type {import('better-sqlite3').Database}
+ */
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

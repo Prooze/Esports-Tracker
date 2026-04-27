@@ -21,7 +21,10 @@ function clog(level, msg) {
   if (completionLog.length > LOG_RING_SIZE) completionLog.shift();
 }
 
-/** Most recent log entries (newest first). Used by the admin completion log viewer. */
+/**
+ * Return the most recent completion-checker log entries, newest first.
+ * @returns {Array<{ts:string, level:string, msg:string}>} Up to 20 log entries.
+ */
 function getRecentLog() {
   return [...completionLog].reverse().slice(0, LOG_DISPLAY_LIMIT);
 }

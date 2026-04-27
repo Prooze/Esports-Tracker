@@ -32,6 +32,11 @@ function getConfig() {
   }
 }
 
+/**
+ * Returns true when all three Cloudinary credentials are present and non-empty.
+ * @param {{cloud_name:string, api_key:string, api_secret:string}} cfg
+ * @returns {boolean}
+ */
 function isConfigured(cfg) {
   return !!(cfg.cloud_name && cfg.api_key && cfg.api_secret);
 }
