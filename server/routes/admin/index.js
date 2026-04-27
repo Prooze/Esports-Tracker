@@ -21,12 +21,14 @@ const SENSITIVE_SETTINGS = ['startgg_token', 'cloudinary_api_key', 'cloudinary_a
  * GET /api/admin/settings — generic key/value store with secrets stripped.
  * Sensitive credentials are managed via /integrations instead.
  */
-router.get('/settings', (_req, res) => {
-  const rows = db.prepare('SELECT * FROM settings').all();
-  const result = {};
-  for (const { key, value } of rows) result[key] = value;
-  for (const key of SENSITIVE_SETTINGS) delete result[key];
-  res.json(result);
+router.get('/settings', (_req, res, next) => {
+  try {
+    const rows = db.prepare('SELECT * FROM settings').all();
+    const result = {};
+    for (const { key, value } of rows) result[key] = value;
+    for (const key of SENSITIVE_SETTINGS) delete result[key];
+    res.json(result);
+  } catch (err) { next(err); }
 });
 
 router.use('/games',         games);

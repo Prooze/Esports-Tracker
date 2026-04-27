@@ -43,11 +43,13 @@ function safePermissions(requested, editor) {
 }
 
 /** GET /api/admin/accounts — list every admin (open to any logged-in admin). */
-router.get('/', (_req, res) => {
-  const rows = db.prepare(
-    `SELECT ${ACCOUNT_FIELDS} FROM admins ORDER BY created_at ASC`
-  ).all();
-  res.json(rows.map(formatAccount));
+router.get('/', (_req, res, next) => {
+  try {
+    const rows = db.prepare(
+      `SELECT ${ACCOUNT_FIELDS} FROM admins ORDER BY created_at ASC`
+    ).all();
+    res.json(rows.map(formatAccount));
+  } catch (err) { next(err); }
 });
 
 /** POST /api/admin/accounts — create a new admin. Requires manage_accounts. */
@@ -116,20 +118,22 @@ router.put('/:id', asyncHandler(async (req, res) => {
 }));
 
 /** DELETE /api/admin/accounts/:id — refuses to delete self or the last admin. */
-router.delete('/:id', checkPermission('manage_accounts'), (req, res) => {
-  const { id } = req.params;
+router.delete('/:id', checkPermission('manage_accounts'), (req, res, next) => {
+  try {
+    const { id } = req.params;
 
-  if (String(req.admin.id) === String(id)) {
-    return sendError(res, 400, 'You cannot delete your own account');
-  }
+    if (String(req.admin.id) === String(id)) {
+      return sendError(res, 400, 'You cannot delete your own account');
+    }
 
-  const { count } = db.prepare('SELECT COUNT(*) AS count FROM admins').get();
-  if (count <= 1) {
-    return sendError(res, 400, 'Cannot delete the last admin account');
-  }
+    const { count } = db.prepare('SELECT COUNT(*) AS count FROM admins').get();
+    if (count <= 1) {
+      return sendError(res, 400, 'Cannot delete the last admin account');
+    }
 
-  db.prepare('DELETE FROM admins WHERE id = ?').run(id);
-  res.json({ success: true });
+    db.prepare('DELETE FROM admins WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

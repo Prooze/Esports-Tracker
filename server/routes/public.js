@@ -17,28 +17,30 @@ const safeParseJson = (v, fallback = []) => {
  * Public-safe subset of branding settings. Sensitive keys (tokens, API keys)
  * are stripped before responding.
  */
-router.get('/settings/public', (_req, res) => {
-  const rows = db.prepare('SELECT * FROM settings').all();
-  const raw = {};
-  for (const { key, value } of rows) raw[key] = value;
+router.get('/settings/public', (_req, res, next) => {
+  try {
+    const rows = db.prepare('SELECT * FROM settings').all();
+    const raw = {};
+    for (const { key, value } of rows) raw[key] = value;
 
-  for (const key of SENSITIVE_KEYS) delete raw[key];
+    for (const key of SENSITIVE_KEYS) delete raw[key];
 
-  res.json({
-    site_name:           raw.site_name           || 'Esports Standings',
-    site_tagline:        raw.site_tagline        || 'Local Circuit',
-    site_logo:           toPath(raw.site_logo),
-    site_favicon:        toPath(raw.site_favicon),
-    hero_banner:         toPath(raw.hero_banner),
-    primary_color:       raw.primary_color       || '#7c6fff',
-    accent_color:        raw.accent_color        || '#7c6fff',
-    announcement_text:   raw.announcement_text   || '',
-    announcement_active: parseBool(raw.announcement_active),
-    footer_links:        safeParseJson(raw.footer_links, []),
-    social_links:        safeParseJson(raw.social_links, []),
-    stream_url:          raw.stream_url          || null,
-    stream_active:       parseBool(raw.stream_active),
-  });
+    res.json({
+      site_name:           raw.site_name           || 'Esports Standings',
+      site_tagline:        raw.site_tagline        || 'Local Circuit',
+      site_logo:           toPath(raw.site_logo),
+      site_favicon:        toPath(raw.site_favicon),
+      hero_banner:         toPath(raw.hero_banner),
+      primary_color:       raw.primary_color       || '#7c6fff',
+      accent_color:        raw.accent_color        || '#7c6fff',
+      announcement_text:   raw.announcement_text   || '',
+      announcement_active: parseBool(raw.announcement_active),
+      footer_links:        safeParseJson(raw.footer_links, []),
+      social_links:        safeParseJson(raw.social_links, []),
+      stream_url:          raw.stream_url          || null,
+      stream_active:       parseBool(raw.stream_active),
+    });
+  } catch (err) { next(err); }
 });
 
 const upcomingForPublicSql = `
@@ -51,21 +53,25 @@ const upcomingForPublicSql = `
 `;
 
 /** GET /api/upcoming — all upcoming tournaments still open for registration. */
-router.get('/upcoming', (_req, res) => {
-  const today  = new Date().toISOString().split('T')[0];
-  const nowIso = new Date().toISOString();
-  const rows = db.prepare(`${upcomingForPublicSql} ORDER BY u.event_date ASC`).all(today, nowIso);
-  res.json(rows);
+router.get('/upcoming', (_req, res, next) => {
+  try {
+    const today  = new Date().toISOString().split('T')[0];
+    const nowIso = new Date().toISOString();
+    const rows = db.prepare(`${upcomingForPublicSql} ORDER BY u.event_date ASC`).all(today, nowIso);
+    res.json(rows);
+  } catch (err) { next(err); }
 });
 
 /** GET /api/upcoming/game/:gameId — upcoming tournaments scoped to one game. */
-router.get('/upcoming/game/:gameId', (req, res) => {
-  const today  = new Date().toISOString().split('T')[0];
-  const nowIso = new Date().toISOString();
-  const rows = db.prepare(
-    `${upcomingForPublicSql} AND u.game_id = ? ORDER BY u.event_date ASC`
-  ).all(today, nowIso, req.params.gameId);
-  res.json(rows);
+router.get('/upcoming/game/:gameId', (req, res, next) => {
+  try {
+    const today  = new Date().toISOString().split('T')[0];
+    const nowIso = new Date().toISOString();
+    const rows = db.prepare(
+      `${upcomingForPublicSql} AND u.game_id = ? ORDER BY u.event_date ASC`
+    ).all(today, nowIso, req.params.gameId);
+    res.json(rows);
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

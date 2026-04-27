@@ -102,8 +102,10 @@ router.post('/sync-organizer', checkPermission('manage_integrations'), asyncHand
 }));
 
 /** GET /api/admin/startgg/pending-games — unmatched games awaiting review. */
-router.get('/pending-games', checkPermission('manage_games'), (_req, res) => {
-  res.json(db.prepare('SELECT * FROM pending_games ORDER BY created_at DESC').all());
+router.get('/pending-games', checkPermission('manage_games'), (_req, res, next) => {
+  try {
+    res.json(db.prepare('SELECT * FROM pending_games ORDER BY created_at DESC').all());
+  } catch (err) { next(err); }
 });
 
 /**
@@ -111,50 +113,54 @@ router.get('/pending-games', checkPermission('manage_games'), (_req, res) => {
  * Promotes the named pending game into a real `games` row, then promotes
  * every other pending entry for the same game name into upcoming_tournaments.
  */
-router.post('/pending-games/:id/approve', checkPermission('manage_games'), (req, res) => {
-  const pending = db.prepare('SELECT * FROM pending_games WHERE id = ?').get(req.params.id);
-  if (!pending) return sendError(res, 404, 'Pending game not found');
+router.post('/pending-games/:id/approve', checkPermission('manage_games'), (req, res, next) => {
+  try {
+    const pending = db.prepare('SELECT * FROM pending_games WHERE id = ?').get(req.params.id);
+    if (!pending) return sendError(res, 404, 'Pending game not found');
 
-  const { game_name = pending.game_name, icon_emoji = '🎮' } = req.body;
-  if (!game_name?.trim()) return sendError(res, 400, 'game_name is required');
+    const { game_name = pending.game_name, icon_emoji = '🎮' } = req.body;
+    if (!game_name?.trim()) return sendError(res, 400, 'game_name is required');
 
-  const gameResult = db.prepare(
-    'INSERT INTO games (name, icon_emoji) VALUES (?, ?)'
-  ).run(game_name.trim(), icon_emoji);
-  const gameId = gameResult.lastInsertRowid;
+    const gameResult = db.prepare(
+      'INSERT INTO games (name, icon_emoji) VALUES (?, ?)'
+    ).run(game_name.trim(), icon_emoji);
+    const gameId = gameResult.lastInsertRowid;
 
-  const siblings = db.prepare(
-    'SELECT * FROM pending_games WHERE lower(game_name) = lower(?)'
-  ).all(pending.game_name);
+    const siblings = db.prepare(
+      'SELECT * FROM pending_games WHERE lower(game_name) = lower(?)'
+    ).all(pending.game_name);
 
-  let added = 0;
-  for (const p of siblings) {
-    const exists = p.startgg_tournament_url
-      ? db.prepare('SELECT id FROM upcoming_tournaments WHERE startgg_url = ?').get(p.startgg_tournament_url)
-      : db.prepare(
-          'SELECT id FROM upcoming_tournaments WHERE name = ? AND event_date = ? AND game_id IS ?'
-        ).get(p.tournament_name, p.event_date, gameId);
-    if (!exists) {
-      db.prepare(
-        'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
-      ).run(p.tournament_name, gameId, p.event_date, p.startgg_tournament_url);
-      added++;
+    let added = 0;
+    for (const p of siblings) {
+      const exists = p.startgg_tournament_url
+        ? db.prepare('SELECT id FROM upcoming_tournaments WHERE startgg_url = ?').get(p.startgg_tournament_url)
+        : db.prepare(
+            'SELECT id FROM upcoming_tournaments WHERE name = ? AND event_date = ? AND game_id IS ?'
+          ).get(p.tournament_name, p.event_date, gameId);
+      if (!exists) {
+        db.prepare(
+          'INSERT INTO upcoming_tournaments (name, game_id, event_date, startgg_url) VALUES (?, ?, ?, ?)'
+        ).run(p.tournament_name, gameId, p.event_date, p.startgg_tournament_url);
+        added++;
+      }
     }
-  }
 
-  db.prepare('DELETE FROM pending_games WHERE lower(game_name) = lower(?)').run(pending.game_name);
+    db.prepare('DELETE FROM pending_games WHERE lower(game_name) = lower(?)').run(pending.game_name);
 
-  res.status(201).json({
-    success: true,
-    game: db.prepare('SELECT * FROM games WHERE id = ?').get(gameId),
-    tournaments_added: added,
-  });
+    res.status(201).json({
+      success: true,
+      game: db.prepare('SELECT * FROM games WHERE id = ?').get(gameId),
+      tournaments_added: added,
+    });
+  } catch (err) { next(err); }
 });
 
 /** DELETE /api/admin/startgg/pending-games/:id — dismiss without approving. */
-router.delete('/pending-games/:id', checkPermission('manage_games'), (req, res) => {
-  db.prepare('DELETE FROM pending_games WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+router.delete('/pending-games/:id', checkPermission('manage_games'), (req, res, next) => {
+  try {
+    db.prepare('DELETE FROM pending_games WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

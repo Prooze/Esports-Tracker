@@ -29,14 +29,16 @@ const settingKeyForUpload = (type) =>
  * PUT /api/admin/settings/branding
  * Persists the text/JSON branding settings (site_name, colors, social_links, etc.).
  */
-router.put('/', checkPermission('manage_branding'), (req, res) => {
-  for (const key of BRANDING_TEXT_KEYS) {
-    if (req.body[key] === undefined) continue;
-    const raw = req.body[key];
-    const value = Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
-    upsertSetting(key, value);
-  }
-  res.json({ success: true });
+router.put('/', checkPermission('manage_branding'), (req, res, next) => {
+  try {
+    for (const key of BRANDING_TEXT_KEYS) {
+      if (req.body[key] === undefined) continue;
+      const raw = req.body[key];
+      const value = Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
+      upsertSetting(key, value);
+    }
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 /**
@@ -46,17 +48,19 @@ router.put('/', checkPermission('manage_branding'), (req, res) => {
 router.post(
   '/:type(logo|favicon|banner)',
   checkPermission('manage_branding'),
-  (req, res) => {
+  (req, res, next) => {
     brandingUpload.single('file')(req, res, async (err) => {
       if (err) return sendError(res, 400, err.message);
       if (!req.file) return sendError(res, 400, 'No file uploaded');
 
-      const settingKey = settingKeyForUpload(req.params.type);
-      const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
-      if (existing?.value) await destroyIfCloudinary(existing.value);
+      try {
+        const settingKey = settingKeyForUpload(req.params.type);
+        const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey);
+        if (existing?.value) await destroyIfCloudinary(existing.value);
 
-      upsertSetting(settingKey, req.file.path);
-      res.json({ path: req.file.path });
+        upsertSetting(settingKey, req.file.path);
+        res.json({ path: req.file.path });
+      } catch (dbErr) { next(dbErr); }
     });
   }
 );
@@ -75,11 +79,13 @@ router.delete(
 );
 
 /** PUT /api/admin/settings/stream — live stream URL + on/off toggle. */
-router.put('/stream', checkPermission('manage_branding'), (req, res) => {
-  const { stream_url, stream_active } = req.body;
-  upsertSetting('stream_url', stream_url || '');
-  upsertSetting('stream_active', String(!!stream_active));
-  res.json({ success: true });
+router.put('/stream', checkPermission('manage_branding'), (req, res, next) => {
+  try {
+    const { stream_url, stream_active } = req.body;
+    upsertSetting('stream_url', stream_url || '');
+    upsertSetting('stream_active', String(!!stream_active));
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

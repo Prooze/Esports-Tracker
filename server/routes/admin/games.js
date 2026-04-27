@@ -15,38 +15,44 @@ const iconUpload = makeUpload(
 );
 
 /** GET /api/admin/games — list all games (open to any authenticated admin). */
-router.get('/', (_req, res) => {
-  res.json(db.prepare('SELECT * FROM games ORDER BY name').all());
+router.get('/', (_req, res, next) => {
+  try {
+    res.json(db.prepare('SELECT * FROM games ORDER BY name').all());
+  } catch (err) { next(err); }
 });
 
 /** POST /api/admin/games — create a game. Requires manage_games. */
-router.post('/', checkPermission('manage_games'), (req, res) => {
-  const { name, icon_emoji = '🎮' } = req.body;
-  if (!name) return sendError(res, 400, 'Name required');
+router.post('/', checkPermission('manage_games'), (req, res, next) => {
+  try {
+    const { name, icon_emoji = '🎮' } = req.body;
+    if (!name) return sendError(res, 400, 'Name required');
 
-  const result = db.prepare(
-    'INSERT INTO games (name, icon_emoji) VALUES (?, ?)'
-  ).run(name.trim(), icon_emoji);
+    const result = db.prepare(
+      'INSERT INTO games (name, icon_emoji) VALUES (?, ?)'
+    ).run(name.trim(), icon_emoji);
 
-  res.status(201).json(db.prepare('SELECT * FROM games WHERE id = ?').get(result.lastInsertRowid));
+    res.status(201).json(db.prepare('SELECT * FROM games WHERE id = ?').get(result.lastInsertRowid));
+  } catch (err) { next(err); }
 });
 
 /** PUT /api/admin/games/:id — rename a game. */
-router.put('/:id', checkPermission('manage_games'), (req, res) => {
-  const { id } = req.params;
-  const { name } = req.body;
-  if (!name?.trim()) return sendError(res, 400, 'Name is required');
+router.put('/:id', checkPermission('manage_games'), (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    if (!name?.trim()) return sendError(res, 400, 'Name is required');
 
-  const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
-  if (!game) return sendError(res, 404, 'Game not found');
+    const game = db.prepare('SELECT * FROM games WHERE id = ?').get(id);
+    if (!game) return sendError(res, 404, 'Game not found');
 
-  const taken = db.prepare(
-    'SELECT id FROM games WHERE lower(name) = lower(?) AND id != ?'
-  ).get(name.trim(), id);
-  if (taken) return sendError(res, 409, 'A game with that name already exists');
+    const taken = db.prepare(
+      'SELECT id FROM games WHERE lower(name) = lower(?) AND id != ?'
+    ).get(name.trim(), id);
+    if (taken) return sendError(res, 409, 'A game with that name already exists');
 
-  db.prepare('UPDATE games SET name = ? WHERE id = ?').run(name.trim(), id);
-  res.json(db.prepare('SELECT * FROM games WHERE id = ?').get(id));
+    db.prepare('UPDATE games SET name = ? WHERE id = ?').run(name.trim(), id);
+    res.json(db.prepare('SELECT * FROM games WHERE id = ?').get(id));
+  } catch (err) { next(err); }
 });
 
 /** DELETE /api/admin/games/:id — also deletes its tournaments via FK cascade. */
