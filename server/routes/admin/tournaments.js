@@ -40,16 +40,24 @@ router.put('/:id', checkPermission('manage_tournaments'), (req, res) => {
   const { name, event_name, game_id, date, recording_url } = req.body;
   const { id } = req.params;
 
+  if (!name?.trim()) return sendError(res, 400, 'name is required');
+
+  const exists = db.prepare('SELECT id FROM tournaments WHERE id = ?').get(id);
+  if (!exists) return sendError(res, 404, 'Tournament not found');
+
   db.prepare(
     `UPDATE tournaments SET name = ?, event_name = ?, game_id = ?, date = ?, recording_url = ?
      WHERE id = ?`
-  ).run(name, event_name || null, game_id, date || null, recording_url || null, id);
+  ).run(name.trim(), event_name || null, game_id, date || null, recording_url || null, id);
 
   res.json(db.prepare('SELECT * FROM tournaments WHERE id = ?').get(id));
 });
 
 /** DELETE /api/admin/tournaments/:id — also cascades to standings. */
 router.delete('/:id', checkPermission('manage_tournaments'), (req, res) => {
+  const exists = db.prepare('SELECT id FROM tournaments WHERE id = ?').get(req.params.id);
+  if (!exists) return sendError(res, 404, 'Tournament not found');
+
   db.prepare('DELETE FROM tournaments WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });

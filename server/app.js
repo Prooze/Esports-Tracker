@@ -55,7 +55,6 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 // ─── CORS ────────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   'http://localhost:5173',
-  process.env.CLIENT_URL,
   process.env.CLIENT_ORIGIN,
 ].filter(Boolean);
 

@@ -146,9 +146,9 @@ async function syncOrganizerTournaments(slug, token) {
   const data = await startggQuery(ORGANIZER_TOURNAMENTS_QUERY, { slug }, token);
   const tournaments = data.user?.tournaments?.nodes ?? [];
 
-  let gamesMatched = 0;
-  let upcomingAdded = 0;
-  let pendingCreated = 0;
+  let added = 0;
+  let pending = 0;
+  let skipped = 0;
 
   for (const tournament of tournaments) {
     // tournament.slug from the API is "tournament/slug-name" — strip the prefix
@@ -170,7 +170,6 @@ async function syncOrganizerTournaments(slug, token) {
       const game = db.prepare('SELECT * FROM games WHERE lower(name) = lower(?)').get(gameName);
 
       if (game) {
-        gamesMatched++;
         const existing = db.prepare(
           'SELECT id FROM upcoming_tournaments WHERE startgg_url = ?'
         ).get(tournamentUrl);
@@ -181,12 +180,15 @@ async function syncOrganizerTournaments(slug, token) {
              (name, game_id, event_date, startgg_url, registration_closes_at)
              VALUES (?, ?, ?, ?, ?)`
           ).run(tournament.name, game.id, eventDate, tournamentUrl, registrationClosesAt);
-          upcomingAdded++;
-        } else if (registrationClosesAt) {
-          db.prepare(
-            `UPDATE upcoming_tournaments SET registration_closes_at = ?
-             WHERE startgg_url = ? AND registration_closes_at IS NULL`
-          ).run(registrationClosesAt, tournamentUrl);
+          added++;
+        } else {
+          if (registrationClosesAt) {
+            db.prepare(
+              `UPDATE upcoming_tournaments SET registration_closes_at = ?
+               WHERE startgg_url = ? AND registration_closes_at IS NULL`
+            ).run(registrationClosesAt, tournamentUrl);
+          }
+          skipped++;
         }
       } else {
         const alreadyPending = db.prepare(
@@ -198,7 +200,7 @@ async function syncOrganizerTournaments(slug, token) {
             `INSERT INTO pending_games (game_name, tournament_name, startgg_tournament_url, event_date)
              VALUES (?, ?, ?, ?)`
           ).run(gameName, tournament.name, tournamentUrl, eventDate);
-          pendingCreated++;
+          pending++;
         }
       }
     }
@@ -206,9 +208,9 @@ async function syncOrganizerTournaments(slug, token) {
 
   return {
     tournaments_found: tournaments.length,
-    games_matched:     gamesMatched,
-    upcoming_added:    upcomingAdded,
-    pending_games:     pendingCreated,
+    added,
+    pending,
+    skipped,
   };
 }
 

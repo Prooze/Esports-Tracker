@@ -71,6 +71,9 @@ router.put('/:id', checkPermission('manage_upcoming'), (req, res) => {
   const { id } = req.params;
   const { name, game_id, event_date, location, startgg_url, description, registration_closes_at } = req.body;
 
+  const exists = db.prepare('SELECT id FROM upcoming_tournaments WHERE id = ?').get(id);
+  if (!exists) return sendError(res, 404, 'Upcoming tournament not found');
+
   db.prepare(
     `UPDATE upcoming_tournaments
      SET name = ?, game_id = ?, event_date = ?, location = ?, startgg_url = ?,
@@ -92,6 +95,9 @@ router.put('/:id', checkPermission('manage_upcoming'), (req, res) => {
 
 /** DELETE /api/admin/upcoming/:id */
 router.delete('/:id', checkPermission('manage_upcoming'), (req, res) => {
+  const exists = db.prepare('SELECT id FROM upcoming_tournaments WHERE id = ?').get(req.params.id);
+  if (!exists) return sendError(res, 404, 'Upcoming tournament not found');
+
   db.prepare('DELETE FROM upcoming_tournaments WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
