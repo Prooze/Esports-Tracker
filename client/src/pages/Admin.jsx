@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef, Component } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Component } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import GameIcon from '../components/GameIcon';
-import { apiBase, resolveImageUrl } from '../utils/images';
+import { resolveImageUrl } from '../utils/images';
 import { SOCIAL_PLATFORMS, SocialIcon } from '../components/SocialIcon';
+import { adminApi } from '../api';
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 class AdminErrorBoundary extends Component {
@@ -39,10 +40,8 @@ class AdminErrorBoundary extends Component {
 function matchGame(games, videogameName) {
   if (!videogameName) return null;
   const needle = videogameName.toLowerCase();
-  // Exact match
   const exact = games.find((g) => g.name.toLowerCase() === needle);
   if (exact) return exact;
-  // Partial: every word in the shorter string appears in the longer one
   const needleWords = needle.split(/\W+/).filter(Boolean);
   const partial = games.find((g) => {
     const hay = g.name.toLowerCase();
@@ -51,7 +50,7 @@ function matchGame(games, videogameName) {
   return partial || null;
 }
 
-function StartggImportForm({ games, onImported, authHeaders }) {
+function StartggImportForm({ games, onImported, admin }) {
   const [url, setUrl] = useState('');
   const [fetchLoading, setFetchLoading] = useState(false);
   const [tournament, setTournament] = useState(null);
@@ -75,19 +74,12 @@ function StartggImportForm({ games, onImported, authHeaders }) {
     setFetchLoading(true);
 
     try {
-      const res = await fetch(`${apiBase}/api/admin/startgg/lookup`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await admin.lookupStartgg(url);
       setTournament(data);
       if (data.startAt) {
         setDate(new Date(data.startAt * 1000).toISOString().split('T')[0]);
       }
 
-      // Auto-select when there is exactly one event
       if (data.events?.length === 1) {
         const ev = data.events[0];
         setSelectedEvent(String(ev.id));
@@ -124,19 +116,13 @@ function StartggImportForm({ games, onImported, authHeaders }) {
     const event = tournament.events.find((e) => String(e.id) === selectedEvent);
 
     try {
-      const res = await fetch(`${apiBase}/api/admin/startgg/import`, {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({
-          eventId: event.id,
-          eventName: event.name,
-          tournamentName: tournament.name,
-          gameId: selectedGame,
-          date,
-        }),
+      const data = await admin.importStartgg({
+        eventId: event.id,
+        eventName: event.name,
+        tournamentName: tournament.name,
+        gameId: selectedGame,
+        date,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
 
       setSuccess(`Imported ${data.count} players from "${data.tournament.name} — ${event.name}"`);
       setUrl('');
@@ -245,7 +231,7 @@ function StartggImportForm({ games, onImported, authHeaders }) {
 }
 
 // ─── Tournaments tab ──────────────────────────────────────────────────────────
-function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
+function TournamentsTab({ tournaments, games, admin, onRefresh }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('manage_tournaments');
   const [editingId, setEditingId] = useState(null);
@@ -270,15 +256,9 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
     setCheckResult(null);
     setCheckError('');
     try {
-      const res = await fetch(`${apiBase}/api/admin/tournaments/check-completions`, {
-        method: 'POST',
-        headers: authHeaders,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await admin.checkCompletions();
       setCheckResult(data);
       onRefresh();
-      // Refresh log automatically after a check
       fetchLog();
     } catch (err) {
       setCheckError(err.message);
@@ -290,8 +270,8 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const fetchLog = async () => {
     setLogLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/admin/tournaments/completion-log`, { headers: authHeaders });
-      if (res.ok) setLogEntries(await res.json());
+      const entries = await admin.getCompletionLog();
+      if (Array.isArray(entries)) setLogEntries(entries);
     } catch (_) {}
     finally { setLogLoading(false); }
   };
@@ -301,7 +281,6 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
     setShowLog((v) => !v);
   };
 
-  // Years present in the game-filtered subset so the year dropdown stays relevant
   const gameFiltered = filterGame
     ? tournaments.filter((t) => String(t.game_id) === filterGame)
     : tournaments;
@@ -314,7 +293,6 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
     )
   ).sort((a, b) => b - a);
 
-  // If the selected year disappeared after a game change, reset it
   const effectiveYear = availableYears.includes(filterYear) ? filterYear : '';
 
   const filtered = gameFiltered.filter(
@@ -323,12 +301,12 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
 
   const handleGameFilterChange = (val) => {
     setFilterGame(val);
-    setFilterYear(''); // year options may change; reset to avoid stale selection
+    setFilterYear('');
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this tournament and all its standings?')) return;
-    await fetch(`${apiBase}/api/admin/tournaments/${id}`, { method: 'DELETE', headers: authHeaders });
+    try { await admin.deleteTournament(id); } catch (_) {}
     onRefresh();
   };
 
@@ -343,11 +321,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   };
 
   const saveEdit = async () => {
-    await fetch(`${apiBase}/api/admin/tournaments/${editingId}`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify(editData),
-    });
+    try { await admin.updateTournament(editingId, editData); } catch (_) {}
     setEditingId(null);
     onRefresh();
   };
@@ -355,33 +329,29 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
   const handleManualAdd = async (e) => {
     e.preventDefault();
     setManualError('');
-    const res = await fetch(`${apiBase}/api/admin/tournaments`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify(manualForm),
-    });
-    const data = await res.json();
-    if (!res.ok) { setManualError(data.error); return; }
-    setManualForm({ name: '', event_name: '', game_id: '', date: '' });
-    setShowManual(false);
-    onRefresh();
+    try {
+      await admin.createTournament(manualForm);
+      setManualForm({ name: '', event_name: '', game_id: '', date: '' });
+      setShowManual(false);
+      onRefresh();
+    } catch (err) {
+      setManualError(err.message);
+    }
   };
 
   const handleSaveRecording = async (urlOverride) => {
     if (!recordingModal) return;
     setRecordingSaving(true);
     const url = urlOverride !== undefined ? urlOverride : recordingUrl;
-    await fetch(`${apiBase}/api/admin/tournaments/${recordingModal.id}`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify({
+    try {
+      await admin.updateTournament(recordingModal.id, {
         name: recordingModal.name,
         event_name: recordingModal.event_name,
         game_id: recordingModal.game_id,
         date: recordingModal.date,
         recording_url: url || null,
-      }),
-    });
+      });
+    } catch (_) {}
     setRecordingSaving(false);
     setRecordingModal(null);
     setRecordingUrl('');
@@ -392,7 +362,7 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
 
   return (
     <div className="tab-content">
-      {canManage && <StartggImportForm games={games} onImported={onRefresh} authHeaders={authHeaders} />}
+      {canManage && <StartggImportForm games={games} onImported={onRefresh} admin={admin} />}
 
       {canManage && <hr className="divider" />}
 
@@ -647,7 +617,16 @@ function TournamentsTab({ tournaments, games, authHeaders, onRefresh }) {
 }
 
 // ─── Games tab ────────────────────────────────────────────────────────────────
-function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
+const PERMISSIONS = [
+  { key: 'manage_games',         label: 'Manage Games' },
+  { key: 'manage_tournaments',   label: 'Manage Tournaments' },
+  { key: 'manage_upcoming',      label: 'Manage Upcoming Tournaments' },
+  { key: 'manage_branding',      label: 'Manage Branding' },
+  { key: 'manage_integrations',  label: 'Manage Integrations' },
+  { key: 'manage_accounts',      label: 'Manage Accounts' },
+];
+
+function GamesTab({ games, pendingGames = [], admin, onRefresh }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('manage_games');
   const [name, setName] = useState('');
@@ -678,16 +657,12 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
     setRenameSaving(true);
     setRenameError('');
     try {
-      const res = await fetch(`${apiBase}/api/admin/games/${id}`, {
-        method: 'PUT',
-        headers: authHeaders,
-        body: JSON.stringify({ name: renameValue.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setRenameError(data.error); return; }
+      await admin.renameGame(id, renameValue.trim());
       setRenamingId(null);
       setRenameValue('');
       onRefresh();
+    } catch (err) {
+      setRenameError(err.message);
     } finally {
       setRenameSaving(false);
     }
@@ -716,92 +691,64 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   const handleApprove = async () => {
     setApproveLoading(true);
     setApproveError('');
-    const res = await fetch(`${apiBase}/api/admin/startgg/pending-games/${approveModal.id}/approve`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({ game_name: approveForm.game_name, icon_emoji: approveForm.icon_emoji }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setApproveError(data.error || 'Failed to add game');
-      setApproveLoading(false);
-      return;
-    }
-    if (approveIconFile && data.game?.id) {
-      const formData = new FormData();
-      formData.append('icon', approveIconFile);
-      await fetch(`${apiBase}/api/admin/games/${data.game.id}/icon`, {
-        method: 'POST',
-        headers: { Authorization: authHeaders.Authorization },
-        body: formData,
+    try {
+      const data = await admin.approvePending(approveModal.id, {
+        game_name: approveForm.game_name,
+        icon_emoji: approveForm.icon_emoji,
       });
+      if (approveIconFile && data.game?.id) {
+        await admin.uploadGameIcon(data.game.id, approveIconFile);
+      }
+      setApproveModal(null);
+      setApproveIconFile(null);
+      setApproveIconPreview('');
+      onRefresh();
+    } catch (err) {
+      setApproveError(err.message || 'Failed to add game');
+    } finally {
+      setApproveLoading(false);
     }
-    setApproveLoading(false);
-    setApproveModal(null);
-    setApproveIconFile(null);
-    setApproveIconPreview('');
-    onRefresh();
   };
 
   const handleDismiss = async (id) => {
     if (!confirm('Remove this pending game entry?')) return;
-    await fetch(`${apiBase}/api/admin/startgg/pending-games/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    });
+    try { await admin.dismissPending(id); } catch (_) {}
     onRefresh();
   };
 
   const handleAdd = async (e) => {
     e.preventDefault();
     setError('');
-    const res = await fetch(`${apiBase}/api/admin/games`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({ name, icon_emoji: emoji }),
-    });
-    const data = await res.json();
-    if (!res.ok) { setError(data.error); return; }
-    if (addIconFile && data.id) {
-      const formData = new FormData();
-      formData.append('icon', addIconFile);
-      await fetch(`${apiBase}/api/admin/games/${data.id}/icon`, {
-        method: 'POST',
-        headers: { Authorization: authHeaders.Authorization },
-        body: formData,
-      });
+    try {
+      const data = await admin.createGame({ name, icon_emoji: emoji });
+      if (addIconFile && data.id) {
+        await admin.uploadGameIcon(data.id, addIconFile);
+      }
+      setName('');
+      setEmoji('🎮');
+      setAddIconFile(null);
+      setAddIconPreview('');
+      if (addIconInputRef.current) addIconInputRef.current.value = '';
+      onRefresh();
+    } catch (err) {
+      setError(err.message);
     }
-    setName('');
-    setEmoji('🎮');
-    setAddIconFile(null);
-    setAddIconPreview('');
-    if (addIconInputRef.current) addIconInputRef.current.value = '';
-    onRefresh();
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this game? All associated tournaments and standings will also be deleted.')) return;
-    await fetch(`${apiBase}/api/admin/games/${id}`, { method: 'DELETE', headers: authHeaders });
+    try { await admin.deleteGame(id); } catch (_) {}
     onRefresh();
   };
 
   const handleIconUpload = async (gameId, file) => {
     if (!file) return;
     setUploadingId(gameId);
-    const formData = new FormData();
-    formData.append('icon', file);
     try {
-      const res = await fetch(`${apiBase}/api/admin/games/${gameId}/icon`, {
-        method: 'POST',
-        headers: { Authorization: authHeaders.Authorization },
-        body: formData,
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Upload failed');
-      } else {
-        onRefresh();
-      }
+      await admin.uploadGameIcon(gameId, file);
+      onRefresh();
+    } catch (err) {
+      alert(err.message || 'Upload failed');
     } finally {
       setUploadingId(null);
       if (fileInputRefs.current[gameId]) fileInputRefs.current[gameId].value = '';
@@ -811,12 +758,10 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   const handleRemoveIcon = async (gameId) => {
     setRemovingId(gameId);
     try {
-      await fetch(`${apiBase}/api/admin/games/${gameId}/icon`, {
-        method: 'DELETE',
-        headers: authHeaders,
-      });
+      await admin.removeGameIcon(gameId);
       onRefresh();
-    } finally {
+    } catch (_) {}
+    finally {
       setRemovingId(null);
     }
   };
@@ -1081,16 +1026,7 @@ function GamesTab({ games, pendingGames = [], authHeaders, onRefresh }) {
   );
 }
 
-// ─── Accounts tab ────────────────────────────────────────────────────────────
-const PERMISSIONS = [
-  { key: 'manage_games',         label: 'Manage Games' },
-  { key: 'manage_tournaments',   label: 'Manage Tournaments' },
-  { key: 'manage_upcoming',      label: 'Manage Upcoming Tournaments' },
-  { key: 'manage_branding',      label: 'Manage Branding' },
-  { key: 'manage_integrations',  label: 'Manage Integrations' },
-  { key: 'manage_accounts',      label: 'Manage Accounts' },
-];
-
+// ─── Accounts tab ─────────────────────────────────────────────────────────────
 function PermCheckboxes({ value, onChange, editorUser, targetIsSuperAdmin, readOnly }) {
   if (targetIsSuperAdmin) {
     return (
@@ -1132,7 +1068,7 @@ function PermCheckboxes({ value, onChange, editorUser, targetIsSuperAdmin, readO
   );
 }
 
-function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
+function AccountsTab({ accounts, currentAdminId, admin, onRefresh }) {
   const { user: currentUser, hasPermission } = useAuth();
   const canManage = hasPermission('manage_accounts');
 
@@ -1150,17 +1086,16 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
     e.preventDefault();
     setAddError('');
     setAddLoading(true);
-    const res = await fetch(`${apiBase}/api/admin/accounts`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify(addForm),
-    });
-    const data = await res.json();
-    setAddLoading(false);
-    if (!res.ok) { setAddError(data.error); return; }
-    setAddForm({ username: '', password: '', permissions: [] });
-    setShowAdd(false);
-    onRefresh();
+    try {
+      await admin.createAccount(addForm);
+      setAddForm({ username: '', password: '', permissions: [] });
+      setShowAdd(false);
+      onRefresh();
+    } catch (err) {
+      setAddError(err.message);
+    } finally {
+      setAddLoading(false);
+    }
   };
 
   const startEdit = (account) => {
@@ -1177,9 +1112,7 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
     setEditError('');
     setEditLoading(true);
     const editedAccount = accounts.find(a => a.id === editingId);
-    const isSelf = editingId === currentAdminId;
 
-    // Build body — only include fields we're allowed to send
     const body = {};
     if (canManage) {
       body.username = editForm.username;
@@ -1187,30 +1120,25 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
     }
     if (editForm.password) body.password = editForm.password;
 
-    const res = await fetch(`${apiBase}/api/admin/accounts/${editingId}`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    setEditLoading(false);
-    if (!res.ok) { setEditError(data.error); return; }
-    setEditingId(null);
-    onRefresh();
+    try {
+      await admin.updateAccount(editingId, body);
+      setEditingId(null);
+      onRefresh();
+    } catch (err) {
+      setEditError(err.message);
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const handleDelete = async (id, username) => {
     if (!confirm(`Delete admin account "${username}"? This cannot be undone.`)) return;
-    const res = await fetch(`${apiBase}/api/admin/accounts/${id}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error);
-      return;
+    try {
+      await admin.deleteAccount(id);
+      onRefresh();
+    } catch (err) {
+      alert(err.message);
     }
-    onRefresh();
   };
 
   const editingAccount = accounts.find(a => a.id === editingId);
@@ -1353,7 +1281,6 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
                   </span>
                 </div>
                 <div className="item-actions">
-                  {/* Any admin can edit their own account (password); manage_accounts can edit all */}
                   {(canManage || a.id === currentAdminId) && (
                     <button className="btn-ghost small" onClick={() => startEdit(a)}>
                       {canManage ? 'Edit' : 'Change Password'}
@@ -1386,7 +1313,7 @@ function AccountsTab({ accounts, currentAdminId, authHeaders, onRefresh }) {
 }
 
 // ─── Integrations tab ─────────────────────────────────────────────────────────
-function IntegrationsTab({ authHeaders, onRefresh }) {
+function IntegrationsTab({ admin, onRefresh }) {
   const [integrations, setIntegrations] = useState(null);
   const [loadError, setLoadError] = useState('');
 
@@ -1409,9 +1336,7 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
   const fetchIntegrations = useCallback(async () => {
     setLoadError('');
     try {
-      const res = await fetch(`${apiBase}/api/admin/integrations`, { headers: authHeaders });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const data = await res.json();
+      const data = await admin.getIntegrations();
       setIntegrations(data);
       setCloudName(data.cloudinary_cloud_name || '');
       setOrganizerUrl(data.startgg_organizer_url || '');
@@ -1420,8 +1345,7 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
     } catch (err) {
       setLoadError(err.message);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [admin]);
 
   useEffect(() => { fetchIntegrations(); }, [fetchIntegrations]);
 
@@ -1440,14 +1364,8 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
     if (apiSecret)    body.cloudinary_api_secret = apiSecret;
     if (startggToken) body.startgg_token         = startggToken;
 
-    const res = await fetch(`${apiBase}/api/admin/integrations`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify(body),
-    });
-
-    setSaving(false);
-    if (res.ok) {
+    try {
+      await admin.saveIntegrations(body);
       setSaved(true);
       setApiKey('');
       setApiSecret('');
@@ -1455,38 +1373,40 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
       fetchIntegrations();
       onRefresh();
       setTimeout(() => setSaved(false), 3000);
-    } else {
-      const data = await res.json();
-      setSaveError(data.error || 'Save failed');
+    } catch (err) {
+      setSaveError(err.message || 'Save failed');
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleSync = async () => {
     setSyncing(true);
     setSyncResult(null);
-    const res = await fetch(`${apiBase}/api/admin/startgg/sync-organizer`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify({ url: organizerUrl }),
-    });
-    const data = await res.json();
-    setSyncing(false);
-    setSyncResult(data);
-    fetchIntegrations();
-    onRefresh();
+    try {
+      const data = await admin.syncOrganizer(organizerUrl);
+      setSyncResult(data);
+    } catch (err) {
+      setSyncResult({ error: err.message });
+    } finally {
+      setSyncing(false);
+      fetchIntegrations();
+      onRefresh();
+    }
   };
 
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
-    const res = await fetch(`${apiBase}/api/admin/integrations/test-cloudinary`, {
-      method: 'POST',
-      headers: authHeaders,
-    });
-    const data = await res.json();
-    setTesting(false);
-    setTestResult(data);
-    fetchIntegrations();
+    try {
+      const data = await admin.testCloudinary();
+      setTestResult(data);
+    } catch (err) {
+      setTestResult({ ok: false, error: err.message });
+    } finally {
+      setTesting(false);
+      fetchIntegrations();
+    }
   };
 
   if (!integrations && !loadError) return <div className="loading" style={{ padding: 24 }}>Loading…</div>;
@@ -1659,7 +1579,7 @@ function IntegrationsTab({ authHeaders, onRefresh }) {
 }
 
 // ─── Upcoming tournaments tab ─────────────────────────────────────────────────
-function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
+function UpcomingTab({ upcoming, games, admin, onRefresh }) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission('manage_upcoming');
   const canImport = hasPermission('manage_tournaments');
@@ -1692,7 +1612,7 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
       startgg_url: t.startgg_url || '',
       description: t.description || '',
       registration_closes_at: t.registration_closes_at
-        ? t.registration_closes_at.slice(0, 16) // trim to YYYY-MM-DDTHH:MM for input
+        ? t.registration_closes_at.slice(0, 16)
         : '',
     });
     setShowForm(true);
@@ -1703,13 +1623,9 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
     setImportingId(id);
     setImportResults((r) => ({ ...r, [id]: null }));
     try {
-      const res = await fetch(`${apiBase}/api/admin/upcoming/${id}/import-standings`, {
-        method: 'POST',
-        headers: authHeaders,
-      });
-      const data = await res.json();
-      setImportResults((r) => ({ ...r, [id]: res.ok ? { ok: true, ...data } : { ok: false, error: data.error } }));
-      if (res.ok) onRefresh();
+      const data = await admin.forceImportUpcoming(id);
+      setImportResults((r) => ({ ...r, [id]: { ok: true, ...data } }));
+      onRefresh();
     } catch (err) {
       setImportResults((r) => ({ ...r, [id]: { ok: false, error: err.message } }));
     } finally {
@@ -1721,31 +1637,29 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
     e.preventDefault();
     setError('');
     setSaving(true);
-    const url = editingId
-      ? `${apiBase}/api/admin/upcoming/${editingId}`
-      : `${apiBase}/api/admin/upcoming`;
-    const method = editingId ? 'PUT' : 'POST';
-
-    const res = await fetch(url, {
-      method,
-      headers: authHeaders,
-      body: JSON.stringify({ ...form, game_id: form.game_id || null }),
-    });
-    const data = await res.json();
-    setSaving(false);
-    if (!res.ok) { setError(data.error); return; }
-    resetForm();
-    onRefresh();
+    try {
+      if (editingId) {
+        await admin.updateUpcoming(editingId, { ...form, game_id: form.game_id || null });
+      } else {
+        await admin.createUpcoming({ ...form, game_id: form.game_id || null });
+      }
+      resetForm();
+      onRefresh();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this upcoming tournament?')) return;
-    await fetch(`${apiBase}/api/admin/upcoming/${id}`, { method: 'DELETE', headers: authHeaders });
+    try { await admin.deleteUpcoming(id); } catch (_) {}
     onRefresh();
   };
 
   const handleDismiss = async (id) => {
-    await fetch(`${apiBase}/api/admin/upcoming/${id}/dismiss`, { method: 'POST', headers: authHeaders });
+    try { await admin.dismissUpcoming(id); } catch (_) {}
     onRefresh();
   };
 
@@ -1906,7 +1820,6 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
         </form>
       )}
 
-      {/* Overdue section */}
       {overdue.length > 0 && (
         <>
           <div className="section-head" style={{ marginTop: 16 }}>
@@ -1926,7 +1839,6 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
         </>
       )}
 
-      {/* Active upcoming */}
       <div className="list" style={{ marginTop: overdue.length > 0 ? 8 : 0 }}>
         {active.length === 0 && overdue.length === 0 ? (
           <div className="empty-state">No upcoming tournaments. Add one to display it on the public page.</div>
@@ -1937,7 +1849,6 @@ function UpcomingTab({ upcoming, games, authHeaders, onRefresh }) {
         )}
       </div>
 
-      {/* Completed section */}
       {completed.length > 0 && (
         <>
           <div
@@ -2007,7 +1918,7 @@ function UploadArea({ label, hint, currentPath, uploadKey, onUpload, onRemove, u
   );
 }
 
-function BrandingTab({ settings, authHeaders, onRefresh }) {
+function BrandingTab({ settings, admin, onRefresh }) {
   const { reloadBranding } = useBranding();
 
   const [form, setForm] = useState({
@@ -2055,76 +1966,57 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
     setSaving(true);
     setSaved(false);
     setSaveError('');
-    const res = await fetch(`${apiBase}/api/admin/settings/branding`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify(form),
-    });
-    setSaving(false);
-    if (res.ok) {
+    try {
+      await admin.saveBranding(form);
       setSaved(true);
       onRefresh();
       reloadBranding();
       setTimeout(() => setSaved(false), 3000);
-    } else {
-      const data = await res.json();
-      setSaveError(data.error || 'Save failed');
+    } catch (err) {
+      setSaveError(err.message || 'Save failed');
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleUpload = async (type, file) => {
     setUploading(type);
-    const formData = new FormData();
-    formData.append('file', file);
     try {
-      const res = await fetch(`${apiBase}/api/admin/settings/${type}`, {
-        method: 'POST',
-        headers: { Authorization: authHeaders.Authorization },
-        body: formData,
-      });
-      if (res.ok) {
-        onRefresh();
-        reloadBranding();
-      } else {
-        const data = await res.json();
-        alert(data.error || 'Upload failed');
-      }
+      await admin.uploadBranding(type, file);
+      onRefresh();
+      reloadBranding();
+    } catch (err) {
+      alert(err.message || 'Upload failed');
     } finally {
       setUploading(null);
     }
   };
 
   const handleRemoveFile = async (type) => {
-    await fetch(`${apiBase}/api/admin/settings/${type}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    });
-    onRefresh();
-    reloadBranding();
+    try {
+      await admin.removeBranding(type);
+      onRefresh();
+      reloadBranding();
+    } catch (_) {}
   };
 
   const handleSaveStream = async () => {
     setStreamSaving(true);
     setStreamSaved(false);
     setStreamError('');
-    const res = await fetch(`${apiBase}/api/admin/settings/stream`, {
-      method: 'PUT',
-      headers: authHeaders,
-      body: JSON.stringify(streamForm),
-    });
-    setStreamSaving(false);
-    if (res.ok) {
+    try {
+      await admin.saveStream(streamForm);
       setStreamSaved(true);
       onRefresh();
       reloadBranding();
       setTimeout(() => setStreamSaved(false), 3000);
-    } else {
-      const data = await res.json();
-      setStreamError(data.error || 'Save failed');
+    } catch (err) {
+      setStreamError(err.message || 'Save failed');
+    } finally {
+      setStreamSaving(false);
     }
   };
 
-  // Footer content helpers
   const addFooterItem = (type) => setForm(f => ({
     ...f,
     footer_links: [
@@ -2145,7 +2037,6 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
     setForm(f => ({ ...f, footer_links: arr }));
   };
 
-  // Social links helpers
   const addSocialLink = () => setForm(f => ({ ...f, social_links: [...f.social_links, { platform: 'twitter', url: '' }] }));
   const removeSocialLink = (i) => setForm(f => ({ ...f, social_links: f.social_links.filter((_, idx) => idx !== i) }));
   const updateSocialLink = (i, field, val) => setForm(f => ({
@@ -2260,7 +2151,6 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
           </div>
         </div>
 
-        {/* Live preview */}
         <div>
           <label className="form-group" style={{ marginBottom: 8 }}><span style={{ color: 'var(--text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '1.5px' }}>Navbar Preview</span></label>
           <div className="branding-preview-panel">
@@ -2480,8 +2370,8 @@ function BrandingTab({ settings, authHeaders, onRefresh }) {
 // ─── Admin root ───────────────────────────────────────────────────────────────
 function AdminPanel() {
   const { token, user, hasPermission } = useAuth();
+  const admin = useMemo(() => adminApi(token), [token]);
 
-  // Determine which tabs this admin can see
   const visibleTabs = [
     hasPermission('manage_tournaments')  && 'tournaments',
     hasPermission('manage_upcoming')     && 'upcoming',
@@ -2502,32 +2392,22 @@ function AdminPanel() {
   const [loadError, setLoadError] = useState(null);
   const [importNotification, setImportNotification] = useState(null);
 
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-  };
-
   const fetchData = useCallback(async () => {
     setLoadError(null);
     try {
-      const [gRes, tRes, sRes, aRes, uRes] = await Promise.all([
-        fetch(`${apiBase}/api/admin/games`,       { headers: authHeaders }),
-        fetch(`${apiBase}/api/admin/tournaments`, { headers: authHeaders }),
-        fetch(`${apiBase}/api/admin/settings`,    { headers: authHeaders }),
-        fetch(`${apiBase}/api/admin/accounts`,    { headers: authHeaders }),
-        fetch(`${apiBase}/api/admin/upcoming`,    { headers: authHeaders }),
+      const [g, t, s, a, u] = await Promise.all([
+        admin.getGames(),
+        admin.getTournaments(),
+        admin.getSettings(),
+        admin.getAccounts(),
+        admin.getUpcoming(),
       ]);
-      if (!gRes.ok || !tRes.ok || !sRes.ok || !aRes.ok || !uRes.ok) {
-        throw new Error(`Server error — status ${[gRes, tRes, sRes, aRes, uRes].map(r => r.status).join(', ')}`);
-      }
-      const [g, t, s, a, u] = await Promise.all([gRes.json(), tRes.json(), sRes.json(), aRes.json(), uRes.json()]);
       setGames(Array.isArray(g) ? g : []);
       setTournaments(Array.isArray(t) ? t : []);
       setUpcoming(Array.isArray(u) ? u : []);
       setSettings(s && typeof s === 'object' ? s : {});
       setAccounts(Array.isArray(a) ? a : []);
 
-      // Check for auto-import notification
       if (s?.auto_import_last_at) {
         const lastSeen = localStorage.getItem('last_seen_auto_import');
         if (!lastSeen || s.auto_import_last_at > lastSeen) {
@@ -2535,21 +2415,16 @@ function AdminPanel() {
         }
       }
 
-      // Pending games — only available to manage_games; ignore 403
       try {
-        const pgRes = await fetch(`${apiBase}/api/admin/startgg/pending-games`, { headers: authHeaders });
-        if (pgRes.ok) {
-          const pg = await pgRes.json();
-          setPendingGames(Array.isArray(pg) ? pg : []);
-        }
+        const pg = await admin.getPendingGames();
+        setPendingGames(Array.isArray(pg) ? pg : []);
       } catch (_) {}
     } catch (err) {
       setLoadError(err.message || 'Failed to load admin data. Is the server running?');
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [admin]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -2626,29 +2501,29 @@ function AdminPanel() {
         <TournamentsTab
           tournaments={tournaments}
           games={games}
-          authHeaders={authHeaders}
+          admin={admin}
           onRefresh={fetchData}
         />
       )}
       {tab === 'games' && (
-        <GamesTab games={games} pendingGames={pendingGames} authHeaders={authHeaders} onRefresh={fetchData} />
+        <GamesTab games={games} pendingGames={pendingGames} admin={admin} onRefresh={fetchData} />
       )}
       {tab === 'accounts' && (
         <AccountsTab
           accounts={accounts}
           currentAdminId={user?.id}
-          authHeaders={authHeaders}
+          admin={admin}
           onRefresh={fetchData}
         />
       )}
       {tab === 'upcoming' && (
-        <UpcomingTab upcoming={upcoming} games={games} authHeaders={authHeaders} onRefresh={fetchData} />
+        <UpcomingTab upcoming={upcoming} games={games} admin={admin} onRefresh={fetchData} />
       )}
       {tab === 'branding' && (
-        <BrandingTab settings={settings} authHeaders={authHeaders} onRefresh={fetchData} />
+        <BrandingTab settings={settings} admin={admin} onRefresh={fetchData} />
       )}
       {tab === 'integrations' && (
-        <IntegrationsTab authHeaders={authHeaders} onRefresh={fetchData} />
+        <IntegrationsTab admin={admin} onRefresh={fetchData} />
       )}
     </main>
   );
