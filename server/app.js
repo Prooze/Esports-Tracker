@@ -61,6 +61,9 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 const allowedOrigins = [
   'http://localhost:5173',
   process.env.CLIENT_ORIGIN,
+  // CLIENT_URL is the legacy name — kept as a fallback so existing deployments
+  // are not broken; operators should migrate to CLIENT_ORIGIN.
+  process.env.CLIENT_URL,
 ].filter(Boolean);
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
