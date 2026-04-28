@@ -26,3 +26,9 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Graphify knowledge graph output
+graphify-out/
+
+# Obsidian vault
+.obsidian/
